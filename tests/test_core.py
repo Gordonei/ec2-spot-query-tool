@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+pytest_plugins = ("tests.test_utils",)
+
 import datetime as dt
 
 import pandas as pd

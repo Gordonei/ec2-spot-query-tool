@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+pytest_plugins = ("tests.test_utils",)
+
 import typer
 from typer.testing import CliRunner
 from unittest.mock import patch, MagicMock
