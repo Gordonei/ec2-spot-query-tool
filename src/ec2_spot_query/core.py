@@ -120,7 +120,7 @@ def _fetch_region_prices(
     total_records = 0
     first_it = instance_types[0]
 
-    kwargs: dict[str, Any] = {
+    spot_history_kwargs: dict[str, Any] = {
         "StartTime": start,
         "EndTime": end,
         "ProductDescriptions": [product_description],
@@ -131,7 +131,7 @@ def _fetch_region_prices(
 
     while True:
         t0 = time.perf_counter()
-        resp = client.describe_spot_price_history(**kwargs)
+        resp = client.describe_spot_price_history(**spot_history_kwargs)
         page_records = 0
         for item in resp.get("SpotPriceHistory", []):
             ts = item.get("Timestamp")
