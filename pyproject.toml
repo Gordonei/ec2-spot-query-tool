@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ec2-spot-query = "ec2_spot_query.main:app"
+ec2-spot-query = "ec2_spot_query.cli:app"
 
 [build-system]
 requires = ["hatchling"]

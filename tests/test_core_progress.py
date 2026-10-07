@@ -44,6 +44,7 @@ def test_progress_callback_receives_updates(mock_ec2):
     result = core.fetch_spot_prices(
         ["t3.micro"],
         regions=["us-east-1"],
+        days=30,
         progress_callback=callback,
     )
 
@@ -67,6 +68,7 @@ def test_progress_callback_none_is_noop(mock_ec2):
     result = core.fetch_spot_prices(
         ["t3.large"],
         regions=["us-west-2"],
+        days=30,
         progress_callback=None,
     )
 
@@ -103,6 +105,7 @@ def test_progress_callback_format(mock_ec2):
     result = core.fetch_spot_prices(
         ["t3.micro"],
         regions=["us-east-1", "us-east-2"],
+        days=30,
         progress_callback=callback,
     )
 
@@ -135,6 +138,7 @@ def test_progress_includes_all_pairs(mock_ec2):
     core.fetch_spot_prices(
         ["t3.micro", "t3.large"],
         regions=["us-east-1", "us-west-2"],
+        days=30,
         progress_callback=callback,
     )
 
@@ -158,6 +162,6 @@ def test_no_progress_unchanged_behavior(mock_ec2):
         "Regions": [{"RegionName": "us-east-1"}]
     }
 
-    result = core.fetch_spot_prices(["t2.nano"], regions=["us-east-1"])
+    result = core.fetch_spot_prices(["t2.nano"], regions=["us-east-1"], days=30)
     assert len(result) == 1
     assert result[0]["InstanceType"] == "t2.nano"

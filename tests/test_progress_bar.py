@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 from unittest.mock import patch, MagicMock, call
 import sys
 
-from ec2_spot_query.main import app
+from ec2_spot_query.cli import app
 
 
 runner = CliRunner()
@@ -108,7 +108,7 @@ class TestProgressFlagIntegration:
     def test_progress_flag_default_is_false(self):
         """Without --progress flag, the handler is a noop."""
         from rich.console import Console
-        from ec2_spot_query.main import _make_progress_handler
+        from ec2_spot_query.cli import _make_progress_handler
 
         console = Console()
         handler = _make_progress_handler(console, use_progress=False)

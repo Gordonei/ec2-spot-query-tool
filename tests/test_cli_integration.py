@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
-from ec2_spot_query.main import app
+from ec2_spot_query.cli import app
 
 runner = CliRunner()
 

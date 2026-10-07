@@ -1,4 +1,4 @@
-"""Tests for ec2_spot_query.main — Typer CLI entry point."""
+"""Tests for ec2_spot_query.cli — Typer CLI entry point."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import typer
 from typer.testing import CliRunner
 from unittest.mock import patch, MagicMock
 
-from ec2_spot_query.main import app
+from ec2_spot_query.cli import app
 
 
 runner = CliRunner()

@@ -40,16 +40,16 @@ _WINDOWS = {
 
 
 def resolve_instance_types(
-    instance_types: list[str] | None = None,
-    min_vcpu: int = 0,
-    min_ram_gb: float = 0.5,
-    min_gpu: int = 0,
-    region: str = "us-east-1",
-    max_vcpu: int = 64,
-    max_ram_gb: float = 128,
-    max_gpu: int = 8,
-    min_instance_storage_gb: float = 0,
-    max_instance_storage_gb: float = 256,
+    instance_types: list[str] | None,
+    min_vcpu: int,
+    min_ram_gb: float,
+    min_gpu: int,
+    region: str,
+    max_vcpu: int,
+    max_ram_gb: float,
+    max_gpu: int,
+    min_instance_storage_gb: float,
+    max_instance_storage_gb: float,
 ) -> list[str]:
     """Resolve target instance types from input or EC2 describe_instance_types call.
 
@@ -173,7 +173,7 @@ def _fetch_region_prices(
 def fetch_spot_prices(
     instance_types: list[str],
     regions: list[str],
-    days: int = 30,
+    days: int,
     progress_callback: Callable[[str, int], None] | None = None,
     product_description: str = "Linux/UNIX",
 ) -> list[dict[str, Any]]:
