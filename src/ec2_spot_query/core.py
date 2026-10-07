@@ -63,6 +63,24 @@ def resolve_instance_types(
     if instance_types:
         return [t for t in instance_types if t]
 
+    # Log warnings for negative values (interpreted as unbounded)
+    if min_vcpu < 0:
+        logger.warning("min_vcpu is negative (%d); treated as unbounded", min_vcpu)
+    if min_ram_gb < 0:
+        logger.warning("min_ram_gb is negative (%f); treated as unbounded", min_ram_gb)
+    if min_gpu < 0:
+        logger.warning("min_gpu is negative (%d); treated as unbounded", min_gpu)
+    if min_instance_storage_gb < 0:
+        logger.warning("min_instance_storage_gb is negative (%f); treated as unbounded", min_instance_storage_gb)
+    if max_vcpu < 0:
+        logger.warning("max_vcpu is negative (%d); treated as unbounded", max_vcpu)
+    if max_ram_gb < 0:
+        logger.warning("max_ram_gb is negative (%f); treated as unbounded", max_ram_gb)
+    if max_gpu < 0:
+        logger.warning("max_gpu is negative (%d); treated as unbounded", max_gpu)
+    if max_instance_storage_gb < 0:
+        logger.warning("max_instance_storage_gb is negative (%f); treated as unbounded", max_instance_storage_gb)
+
     # Validate min <= max constraints
     if max_vcpu < min_vcpu:
         raise ValueError(f"max_vcpu ({max_vcpu}) cannot be less than min_vcpu ({min_vcpu})")
@@ -113,7 +131,11 @@ def _fetch_region_prices(
     end: dt.datetime,
     product_description: str,
 ) -> list[dict[str, Any]]:
-    """Fetch spot price history for a batch of instance types in one region."""
+    """Fetch spot price history for a batch of instance types in one region.
+
+    Handles API pagination internally via ``NextToken`` — all pages are
+    consumed before returning.
+    """
     client = boto3.client("ec2", region_name=region, config=_EC2_CONFIG)
     records: list[dict[str, Any]] = []
     total_page = 0
@@ -155,7 +177,7 @@ def _fetch_region_prices(
         next_token = resp.get("NextToken")
         if not next_token:
             break
-        kwargs["NextToken"] = next_token
+        spot_history_kwargs["NextToken"] = next_token
 
     # Log concise summary after all pages are fetched
     parts = [f"-> {total_records} records in {elapsed*1000:.0f}ms"]

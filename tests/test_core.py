@@ -356,3 +356,80 @@ def test_resolve_max_storage_less_than_min_raises():
     with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
         with pytest.raises(ValueError, match="max_instance_storage_gb.*min_instance_storage_gb"):
             core.resolve_instance_types(instance_types=[], min_vcpu=0, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=64, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=200, max_instance_storage_gb=100)
+
+
+def test_negative_min_vcpu_triggers_warning(mock_ec2):
+    """Negative min_vcpu triggers a warning log."""
+    mock_ec2.describe_instance_types.return_value = {"InstanceTypes": []}
+    with patch("ec2_spot_query.core.logger") as mock_logger:
+        result = core.resolve_instance_types(
+            instance_types=[],
+            min_vcpu=-1,
+            min_ram_gb=0.5,
+            min_gpu=0,
+            region="us-east-1",
+            max_vcpu=64,
+            max_ram_gb=128,
+            max_gpu=8,
+            min_instance_storage_gb=0,
+            max_instance_storage_gb=256,
+        )
+    mock_logger.warning.assert_any_call("min_vcpu is negative (%d); treated as unbounded", -1)
+
+
+def test_negative_max_ram_gb_triggers_warning(mock_ec2):
+    """Negative max_ram_gb triggers a warning log."""
+    mock_ec2.describe_instance_types.return_value = {"InstanceTypes": []}
+    with patch("ec2_spot_query.core.logger") as mock_logger:
+        result = core.resolve_instance_types(
+            instance_types=[],
+            min_vcpu=0,
+            min_ram_gb=-1.0,
+            min_gpu=0,
+            region="us-east-1",
+            max_vcpu=64,
+            max_ram_gb=-0.5,
+            max_gpu=8,
+            min_instance_storage_gb=0,
+            max_instance_storage_gb=256,
+        )
+    mock_logger.warning.assert_any_call("max_ram_gb is negative (%f); treated as unbounded", -0.5)
+    mock_logger.warning.assert_any_call("min_ram_gb is negative (%f); treated as unbounded", -1.0)
+
+
+def test_fetch_region_prices_consumes_multiple_pages(mock_ec2):
+    """Multi-page responses are fully consumed."""
+    mock_ec2.describe_spot_price_history.side_effect = [
+        {
+            "SpotPriceHistory": [
+                {
+                    "InstanceId": "us-east-1:us-east-1a",
+                    "AvailabilityZone": "us-east-1a",
+                    "InstanceType": "t3.micro",
+                    "SpotPrice": "0.010",
+                    "Timestamp": dt.datetime(2025, 10, 1, 0, 0, tzinfo=dt.timezone.utc),
+                },
+            ],
+            "NextToken": "page2",
+        },
+        {
+            "SpotPriceHistory": [
+                {
+                    "InstanceId": "us-east-1:us-east-1a",
+                    "AvailabilityZone": "us-east-1a",
+                    "InstanceType": "t3.micro",
+                    "SpotPrice": "0.011",
+                    "Timestamp": dt.datetime(2025, 10, 1, 1, 0, tzinfo=dt.timezone.utc),
+                },
+            ],
+        },
+    ]
+    result = core._fetch_region_prices(
+        "us-east-1",
+        ["t3.micro"],
+        dt.datetime(2025, 10, 1, tzinfo=dt.timezone.utc),
+        dt.datetime(2025, 10, 2, tzinfo=dt.timezone.utc),
+        "Linux/UNIX",
+    )
+    assert len(result) == 2
+    assert mock_ec2.describe_spot_price_history.call_count == 2
