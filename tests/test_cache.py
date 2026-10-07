@@ -115,3 +115,116 @@ class TestCacheRoundtrip:
             with patch("ec2_spot_query.cache.get_cache_paths", return_value=mock_paths):
                 cache.clear_cache()
             assert not cache_file.exists()
+
+
+class TestCacheContextManager:
+    """Test the _open_cache context manager."""
+
+    def test_open_cache_valid_json(self, tmp_path):
+        """_open_cache yields parsed JSON dict for valid file."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        cache_file.write_text(json.dumps({"existing": "data"}), encoding="utf-8")
+
+        with cache._open_cache(cache_file, mode="r") as data:
+            assert data == {"existing": "data"}
+
+    def test_open_cache_missing_file(self, tmp_path):
+        """_open_cache yields None when file does not exist."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        # Don't create the file
+
+        with cache._open_cache(cache_file, mode="r") as data:
+            assert data is None
+
+    def test_open_cache_corrupt_json(self, tmp_path):
+        """_open_cache yields None when file contains corrupt JSON."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        cache_file.write_text("not valid json{{{", encoding="utf-8")
+
+        with cache._open_cache(cache_file, mode="r") as data:
+            assert data is None
+
+    def test_open_cache_write_mode_creates_dir(self, tmp_path):
+        """_open_cache write mode creates parent directory if needed."""
+        nested = tmp_path / "deep" / "nested" / cache.CACHE_FILENAME
+        assert not nested.parent.exists()
+
+        with cache._open_cache(nested, mode="w") as data:
+            assert isinstance(data, dict)
+            assert nested.parent.exists()
+
+    def test_open_cache_write_mode_persists_data(self, tmp_path):
+        """_open_cache write mode persists modified data after context exit."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+
+        with cache._open_cache(cache_file, mode="w") as data:
+            data["new_key"] = "new_value"
+
+        content = json.loads(cache_file.read_text(encoding="utf-8"))
+        assert content == {"new_key": "new_value"}
+
+    def test_open_cache_write_mode_preserves_existing(self, tmp_path):
+        """_open_cache write mode preserves existing entries."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        cache_file.write_text(json.dumps({"existing": "data"}), encoding="utf-8")
+
+        with cache._open_cache(cache_file, mode="w") as data:
+            data["new_key"] = "new_value"
+
+        content = json.loads(cache_file.read_text(encoding="utf-8"))
+        assert content == {"existing": "data", "new_key": "new_value"}
+
+
+class TestCacheWritable:
+    """Test _is_writable_or_can_become."""
+
+    def test_writable_existing_path(self, tmp_path):
+        """Existing writable path returns True."""
+        writable_dir = tmp_path / "writable"
+        writable_dir.mkdir()
+        assert cache._is_writable_or_can_become(writable_dir) is True
+
+    def test_writable_nonexistent_creates_dir(self, tmp_path):
+        """Non-existent path creates directory and returns True when writable."""
+        new_path = tmp_path / "new_dir"
+        assert not new_path.exists()
+        result = cache._is_writable_or_can_become(new_path)
+        assert result is True
+        assert new_path.exists()
+
+    def test_writable_nonexistent_no_permission(self, tmp_path):
+        """Non-existent path that cannot be created returns False."""
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        # Make parent read-only so we can't create inside it
+        parent.chmod(0o444)
+        path_to_test = parent / "should_fail"
+        try:
+            result = cache._is_writable_or_can_become(path_to_test)
+            assert result is False
+        finally:
+            parent.chmod(0o755)  # Restore for cleanup
+
+
+class TestCacheKey:
+    """Test cache key includes region."""
+
+    def test_spot_cache_key_includes_regions(self):
+        """Cache key format includes regions."""
+        key = cache.make_spot_cache_key(["t3.micro", "t3.large"], ["us-east-1", "eu-west-1"])
+        assert "us-east-1" in key
+        assert "eu-west-1" in key
+        assert "t3.micro" in key
+        assert "t3.large" in key
+
+    def test_cache_key_sorted_regions(self):
+        """Cache key regions are sorted."""
+        key1 = cache.make_spot_cache_key(["t3.micro"], ["eu-west-1", "us-east-1"])
+        key2 = cache.make_spot_cache_key(["t3.micro"], ["us-east-1", "eu-west-1"])
+        assert key1 == key2
+
+    def test_cache_key_sorted_instances(self):
+        """Cache key instance types are sorted."""
+        key1 = cache.make_spot_cache_key(["t3.large", "t3.micro"], ["us-east-1"])
+        key2 = cache.make_spot_cache_key(["t3.micro", "t3.large"], ["us-east-1"])
+        assert key1 == key2

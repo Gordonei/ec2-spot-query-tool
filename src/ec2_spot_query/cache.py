@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -32,18 +33,53 @@ def get_cache_paths() -> list[Path]:
     return candidates
 
 
+@contextmanager
+def _open_cache(path: Path, mode: str = "r"):
+    """Context manager for cache file I/O.
+
+    In *read* mode (``"r"``), yields the parsed JSON dict or ``None`` if
+    the file does not exist or contains corrupt JSON.
+
+    In *write* mode (``"w"``), yields an empty dict or the existing data
+    dict.  Modifications to the yielded dict are persisted to disk when
+    the context exits (parent directory is created automatically).
+    """
+    if mode == "r":
+        if not path.exists():
+            yield None
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            yield data
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+            yield None
+    elif mode == "w":
+        parent = path.parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            yield {}
+            return
+        existing: dict = {}
+        if path.exists():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, ValueError, TypeError):
+                existing = {}
+        yield existing
+        try:
+            path.write_text(json.dumps(existing, default=str), encoding="utf-8")
+        except (OSError, TypeError, ValueError):
+            pass
+
+
 def _is_writable_or_can_become(path: Path) -> bool:
     """Return True if *path* exists and is writable, or can be created."""
-    if path.exists():
-        return os.access(path, os.W_OK)
     try:
         path.mkdir(parents=True, exist_ok=True)
-        test_file = path / ".test_writable"
-        test_file.touch()
-        test_file.unlink()
-        return True
-    except (OSError, PermissionError):
+    except OSError:
         return False
+    return os.access(path, os.W_OK)
 
 
 def load_cache(key: str, ttl_seconds: float = SPOT_TTL_SECONDS) -> Any | None:
@@ -52,15 +88,11 @@ def load_cache(key: str, ttl_seconds: float = SPOT_TTL_SECONDS) -> Any | None:
     Returns ``None`` if the key is not found or the entry has expired.
     """
     for path in get_cache_paths():
-        if path.exists():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                if key in data:
-                    entry = data[key]
-                    if time.time() < entry.get("expires_at", 0):
-                        return entry["data"]
-            except (json.JSONDecodeError, KeyError, ValueError):
-                continue
+        with _open_cache(path, mode="r") as data:
+            if data is not None and key in data:
+                entry = data[key]
+                if time.time() < entry.get("expires_at", 0):
+                    return entry["data"]
     return None
 
 
@@ -71,20 +103,9 @@ def save_cache(key: str, data: Any, ttl_seconds: float = SPOT_TTL_SECONDS) -> No
         "expires_at": time.time() + ttl_seconds,
     }
     for path in get_cache_paths():
-        try:
-            parent = path.parent
-            parent.mkdir(parents=True, exist_ok=True)
-            existing: dict = {}
-            if path.exists():
-                try:
-                    existing = json.loads(path.read_text(encoding="utf-8"))
-                except (json.JSONDecodeError, ValueError):
-                    existing = {}
+        with _open_cache(path, mode="w") as existing:
             existing[key] = entry
-            path.write_text(json.dumps(existing, default=str), encoding="utf-8")
-            return
-        except (OSError, PermissionError, TypeError, ValueError):
-            continue
+        return
 
 
 def clear_cache() -> None:
@@ -96,3 +117,13 @@ def clear_cache() -> None:
             return
         except (OSError, PermissionError):
             continue
+
+
+def make_spot_cache_key(instance_types: list[str], regions: list[str]) -> str:
+    """Build a deterministic cache key from instance types and regions.
+
+    Both lists are sorted so that different orderings produce the same key.
+    """
+    sorted_instances = ",".join(sorted(instance_types))
+    sorted_regions = ",".join(sorted(regions))
+    return f"spot:{sorted_instances}:{sorted_regions}"
