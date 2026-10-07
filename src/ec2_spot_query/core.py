@@ -162,6 +162,7 @@ def _fetch_region_prices(
             if isinstance(ts, dt.datetime) and ts.tzinfo is None:
                 ts = ts.replace(tzinfo=dt.timezone.utc)
             records.append({
+                "Region": region,
                 "InstanceId": f"{region}:{item.get('AvailabilityZone', '')}",
                 "AvailabilityZone": item.get("AvailabilityZone", ""),
                 "InstanceType": item.get("InstanceType", first_it),
@@ -246,6 +247,50 @@ def fetch_spot_prices(
     return all_records
 
 
+def _compute_group_metrics(grp_sorted: pd.DataFrame, itype: str, region_az: str) -> dict[str, Any]:
+    """Compute metric row for one (instance_type, region_az) group."""
+    last_price = float(grp_sorted["SpotPrice"].iloc[-1])
+    row: dict[str, Any] = {
+        "region_az": region_az,
+        "region": region_az.rsplit("/", 1)[0],
+        "instance_type": itype,
+        "current_price": last_price,
+    }
+
+    for wname, wdelta in _WINDOWS.items():
+        if len(grp_sorted) < 2:
+            mean_val = float(grp_sorted["SpotPrice"].mean())
+            row[f"{wname}_mean"] = mean_val
+            row[f"{wname}_vol"] = 0.0
+            continue
+
+        # Resample into the window size
+        resampled = grp_sorted["SpotPrice"].resample(wdelta)
+
+        # Collect all window-bucket means
+        bucket_means: list[float] = []
+        for _, bucket in resampled:
+            if len(bucket) > 0:
+                bucket_means.append(float(bucket.mean()))
+                bucket_std = float(bucket.std())
+                if pd.isna(bucket_std) or bucket_std == 0.0:
+                    bucket_std = 0.0
+                row.setdefault(f"{wname}_vol_buckets", []).append(bucket_std)
+
+        if bucket_means:
+            row[f"{wname}_mean"] = float(pd.Series(bucket_means).mean())
+            vol_series = pd.Series(row.pop(f"{wname}_vol_buckets", [0.0]))
+            overall_vol = float(vol_series.std())
+            if pd.isna(overall_vol) or overall_vol == 0.0:
+                overall_vol = 0.0
+            row[f"{wname}_vol"] = overall_vol
+        else:
+            row[f"{wname}_mean"] = mean_val
+            row[f"{wname}_vol"] = 0.0
+
+    return row
+
+
 def compute_metrics(
     raw_data: list[dict[str, Any]],
     sort_by: str = "1d_mean",
@@ -255,6 +300,9 @@ def compute_metrics(
     For every (InstanceType, AZ) group, mean and standard deviation are
     computed for each of the 6 time windows (1 h … 1 m).  Flat price
     histories get a volatility of ``0.0`` instead of ``NaN``.
+
+    The returned DataFrame includes a ``region`` column alongside the
+    existing ``region_az`` column.
     """
     if not raw_data:
         return _empty_result()
@@ -265,58 +313,14 @@ def compute_metrics(
     df = df.sort_values("Timestamp")
 
     # Build group key: region/az + instance_type
-    df["region_az"] = df.apply(
-        lambda r: f"{r.get('InstanceId', '').split(':')[0]}/{r.get('AvailabilityZone', '')}",
-        axis=1,
-    )
+    df["region_az"] = df["Region"] + "/" + df["AvailabilityZone"]
 
-    groups = df.groupby(["InstanceType", "region_az"])
-    rows: list[dict[str, Any]] = []
+    def _row_generator():
+        for (itype, group_key), grp in df.groupby(["InstanceType", "region_az"]):
+            grp_sorted = grp.set_index("Timestamp").sort_index()
+            yield _compute_group_metrics(grp_sorted, itype, group_key)
 
-    for (itype, group_key), grp in groups:
-        grp_sorted = grp.set_index("Timestamp").sort_index()
-        last_price = float(grp_sorted["SpotPrice"].iloc[-1])
-
-        row: dict[str, Any] = {
-            "region_az": group_key,
-            "instance_type": itype,
-            "current_price": last_price,
-        }
-
-        for wname, wdelta in _WINDOWS.items():
-            if len(grp_sorted) < 2:
-                mean_val = float(grp_sorted["SpotPrice"].mean())
-                row[f"{wname}_mean"] = mean_val
-                row[f"{wname}_vol"] = 0.0
-                continue
-
-            # Resample into the window size
-            resampled = grp_sorted["SpotPrice"].resample(wdelta)
-
-            # Collect all window-bucket means
-            bucket_means: list[float] = []
-            for _, bucket in resampled:
-                if len(bucket) > 0:
-                    bucket_means.append(float(bucket.mean()))
-                    bucket_std = float(bucket.std())
-                    if pd.isna(bucket_std) or bucket_std == 0.0:
-                        bucket_std = 0.0
-                    row.setdefault(f"{wname}_vol_buckets", []).append(bucket_std)
-
-            if bucket_means:
-                row[f"{wname}_mean"] = float(pd.Series(bucket_means).mean())
-                vol_series = pd.Series(row.pop(f"{wname}_vol_buckets", [0.0]))
-                overall_vol = float(vol_series.std())
-                if pd.isna(overall_vol) or overall_vol == 0.0:
-                    overall_vol = 0.0
-                row[f"{wname}_vol"] = overall_vol
-            else:
-                row[f"{wname}_mean"] = mean_val
-                row[f"{wname}_vol"] = 0.0
-
-        rows.append(row)
-
-    result = pd.DataFrame(rows)
+    result = pd.DataFrame(list(_row_generator()))
 
     # Sort descending by the requested metric
     if sort_by in result.columns:
@@ -328,7 +332,7 @@ def compute_metrics(
 def _empty_result() -> pd.DataFrame:
     """Return an empty DataFrame with the expected column schema."""
     ncols = [
-        "region_az", "instance_type", "current_price",
+        "region_az", "region", "instance_type", "current_price",
         "1h_mean", "1h_vol", "6h_mean", "6h_vol",
         "12h_mean", "12h_vol", "1d_mean", "1d_vol",
         "1w_mean", "1w_vol", "1m_mean", "1m_vol",
@@ -349,12 +353,13 @@ def aggregate_by_region(
         return df
 
     df = df.copy()
-    df["region"] = df["region_az"].str.split("/").str[0]
+    if "region" not in df.columns:
+        df["region"] = df["region_az"].str.split("/").str[0]
 
     result = []
     for (itype, region), group in df.groupby(["instance_type", "region"]):
         best = group.loc[group["current_price"].idxmin()].copy()
-        row = {"region_az": region, "instance_type": itype}
+        row: dict[str, Any] = {"region_az": region, "instance_type": itype}
         for col in df.columns:
             if col in ("region_az", "region", "instance_type"):
                 continue

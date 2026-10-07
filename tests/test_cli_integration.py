@@ -21,6 +21,7 @@ def _make_mock_ec2(
     if spot_records is None:
         spot_records = [
             {
+                "Region": "us-east-1",
                 "InstanceId": "us-east-1:us-east-1a",
                 "AvailabilityZone": "us-east-1a",
                 "InstanceType": "t3.micro",
@@ -45,7 +46,7 @@ class TestFullWorkflow:
         mock = mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
         result = runner.invoke(
             app,
-            ["--instance-types", "t3.micro", "--regions", "us-east-1"],
+            ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         assert "EC2 Spot Instance Rankings" in result.stdout
@@ -71,7 +72,7 @@ class TestAllRegions:
         mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
         result = runner.invoke(
             app,
-            ["--instance-types", "t3.micro", "--all-regions"],
+            ["--instance-types", "t3.micro", "--all-regions", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
 
@@ -90,6 +91,7 @@ class TestCacheHitFlow:
             "spot:t3.micro:us-east-1": {
                 "data": [
                     {
+                        "Region": "us-east-1",
                         "InstanceId": "us-east-1:us-east-1a",
                         "AvailabilityZone": "us-east-1a",
                         "InstanceType": "t3.micro",
@@ -128,6 +130,7 @@ class TestCacheMissFlow:
 
         spot_records = [
             {
+                "Region": "us-east-1",
                 "InstanceId": "us-east-1:us-east-1a",
                 "AvailabilityZone": "us-east-1a",
                 "InstanceType": "t3.micro",
@@ -158,11 +161,12 @@ class TestProgressFlag:
         assert result.exit_code == 0
         assert "--progress" in result.stdout
 
-    def test_progress_flag_default_is_false(self):
+    def test_progress_flag_default_is_false(self, mocker):
         """--progress defaults to false."""
-        result = runner.invoke(app, ["--instance-types", "t3.micro", "--regions", "us-east-1"])
-        # Without progress, spinner should not appear
-        assert "spinner" not in result.stdout.lower() or result.exit_code == 0
+        mock_ec2 = _make_mock_ec2()
+        mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
+        result = runner.invoke(app, ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"])
+        assert result.exit_code == 0
 
 
 class TestDebugFlag:
@@ -180,6 +184,6 @@ class TestDebugFlag:
         mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
         result = runner.invoke(
             app,
-            ["--instance-types", "t3.micro", "--regions", "us-east-1", "--debug"],
+            ["--instance-types", "t3.micro", "--regions", "us-east-1", "--debug", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout

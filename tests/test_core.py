@@ -25,7 +25,7 @@ def test_compute_metrics_has_correct_columns():
     """Result DataFrame has all expected column names."""
     result = core.compute_metrics([])
     expected_cols = [
-        "region_az", "instance_type", "current_price",
+        "region_az", "region", "instance_type", "current_price",
         "1h_mean", "1h_vol",
         "6h_mean", "6h_vol",
         "12h_mean", "12h_vol",
@@ -73,6 +73,13 @@ def test_compute_metrics_grouped_by_az(raw_spot_data):
     assert "us-east-1/us-east-1b" in group_labels
 
 
+def test_compute_metrics_has_region_column(raw_spot_data):
+    """Output DataFrame includes a separate region column."""
+    df = core.compute_metrics(raw_spot_data)
+    assert "region" in df.columns
+    assert df["region"].str.contains("us-east-1").all()
+
+
 def test_compute_metrics_sort_by_6h_mean(raw_spot_data):
     """Sorting by a different metric also works."""
     df = core.compute_metrics(raw_spot_data, sort_by="6h_mean")
@@ -104,6 +111,7 @@ def test_fetch_spot_prices_returns_list(mock_ec2):
     mock_ec2.describe_spot_price_history.return_value = {
         "SpotPriceHistory": [
             {
+                "Region": "us-east-1",
                 "InstanceId": "us-east-1:us-east-1a",
                 "AvailabilityZone": "us-east-1a",
                 "InstanceType": "t3.micro",
@@ -403,6 +411,7 @@ def test_fetch_region_prices_consumes_multiple_pages(mock_ec2):
         {
             "SpotPriceHistory": [
                 {
+                    "Region": "us-east-1",
                     "InstanceId": "us-east-1:us-east-1a",
                     "AvailabilityZone": "us-east-1a",
                     "InstanceType": "t3.micro",
@@ -415,6 +424,7 @@ def test_fetch_region_prices_consumes_multiple_pages(mock_ec2):
         {
             "SpotPriceHistory": [
                 {
+                    "Region": "us-east-1",
                     "InstanceId": "us-east-1:us-east-1a",
                     "AvailabilityZone": "us-east-1a",
                     "InstanceType": "t3.micro",

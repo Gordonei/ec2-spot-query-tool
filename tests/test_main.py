@@ -34,7 +34,7 @@ def test_cli_invoke_no_errors(mock_ec2):
             }
         ]
     }
-    result = runner.invoke(app, ["--instance-types", "t3.micro", "--regions", "us-east-1"])
+    result = runner.invoke(app, ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"])
     assert result.exit_code == 0
 
 

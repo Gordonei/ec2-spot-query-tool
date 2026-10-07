@@ -30,6 +30,7 @@ def _make_spot_record(
 ) -> dict[str, Any]:
     ts = ts or dt.datetime(2025, 10, 1, 0, 0, tzinfo=dt.timezone.utc)
     return {
+        "Region": region,
         "InstanceId": f"{region}:{az}",
         "AvailabilityZone": az,
         "InstanceType": instance_type,
