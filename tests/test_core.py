@@ -123,7 +123,7 @@ def test_fetch_spot_prices_returns_list(mock_ec2):
         ]
     }
     mock_ec2.describe_regions.return_value = {"Regions": [{"RegionName": "us-east-1"}]}
-    result = core.fetch_spot_prices(["t3.micro"], regions=["us-east-1"], days=30)
+    result = core.fetch_spot_prices(["t3.micro"], regions=["us-east-1"], days=30, product_description="Linux/UNIX")
     assert isinstance(result, list)
 
 
@@ -135,7 +135,6 @@ def test_resolve_instance_types_provided():
         min_vcpu=0,
         min_ram_gb=0.5,
         min_gpu=0,
-        region="us-east-1",
         max_vcpu=64,
         max_ram_gb=128,
         max_gpu=8,
@@ -155,13 +154,12 @@ def test_resolve_instance_types_filters_instances():
             {"InstanceType": "t2.micro", "VCpuInfo": {"DefaultVCpus": 1}, "MemoryInfo": {"SizeInMiB": 1024}},
         ]
     }
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
         result = core.resolve_instance_types(
             instance_types=[],
             min_vcpu=2,
             min_ram_gb=0.5,
             min_gpu=0,
-            region="us-east-1",
             max_vcpu=64,
             max_ram_gb=128,
             max_gpu=8,
@@ -249,8 +247,8 @@ def test_resolve_max_vcpu_excludes():
             {"InstanceType": "p3.2xlarge", "VCpuInfo": {"DefaultVCpus": 8}, "MemoryInfo": {"SizeInMiB": 61440}},
         ]
     }
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
-        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=5, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=0, max_instance_storage_gb=256)
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, max_vcpu=5, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=0, max_instance_storage_gb=256)
     mock_client.describe_instance_types.assert_called_once()
     assert "p2.xlarge" in result
     assert "p3.2xlarge" not in result
@@ -265,8 +263,8 @@ def test_resolve_max_ram_excludes():
             {"InstanceType": "p3.2xlarge", "VCpuInfo": {"DefaultVCpus": 8}, "MemoryInfo": {"SizeInMiB": 629145}},
         ]
     }
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
-        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=64, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=0, max_instance_storage_gb=256)
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, max_vcpu=64, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=0, max_instance_storage_gb=256)
     assert "t3.micro" in result
     assert "p3.2xlarge" not in result
 
@@ -280,8 +278,8 @@ def test_resolve_max_gpu_excludes():
             {"InstanceType": "p4d.24xlarge", "VCpuInfo": {"DefaultVCpus": 96}, "MemoryInfo": {"SizeInMiB": 11534336}, "GpuInfo": {"Gpus": [{"Count": 8}]}},
         ]
     }
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
-        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=64, max_ram_gb=128, max_gpu=4, min_instance_storage_gb=0, max_instance_storage_gb=256)
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, max_vcpu=64, max_ram_gb=128, max_gpu=4, min_instance_storage_gb=0, max_instance_storage_gb=256)
     assert "t3.micro" in result
     assert "p4d.24xlarge" not in result
 
@@ -295,8 +293,8 @@ def test_resolve_storage_filter_excludes_high():
             {"InstanceType": "d3.2xlarge", "VCpuInfo": {"DefaultVCpus": 8}, "MemoryInfo": {"SizeInMiB": 65536}, "InstanceStorageInfo": {"TotalSizeInGB": 8000}},
         ]
     }
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
-        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=64, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=1, max_instance_storage_gb=100)
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, max_vcpu=64, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=1, max_instance_storage_gb=100)
     assert "m5.large" in result
     assert "d3.2xlarge" not in result
 
@@ -310,8 +308,8 @@ def test_resolve_storage_filter_excludes_low():
             {"InstanceType": "d3.2xlarge", "VCpuInfo": {"DefaultVCpus": 8}, "MemoryInfo": {"SizeInMiB": 65536}, "InstanceStorageInfo": {"TotalSizeInGB": 8000}},
         ]
     }
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
-        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=64, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=1000, max_instance_storage_gb=10000)
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, max_vcpu=64, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=1000, max_instance_storage_gb=10000)
     assert "m5.large" not in result
     assert "d3.2xlarge" in result
 
@@ -324,11 +322,11 @@ def test_resolve_storage_multi_disk():
             {"InstanceType": "hlo1.24xl", "VCpuInfo": {"DefaultVCpus": 96}, "MemoryInfo": {"SizeInMiB": 786432}, "InstanceStorageInfo": {"TotalSizeInGB": 1000}},
         ]
     }
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
-        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=128, max_ram_gb=1024, max_gpu=8, min_instance_storage_gb=1, max_instance_storage_gb=900)
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, max_vcpu=128, max_ram_gb=1024, max_gpu=8, min_instance_storage_gb=1, max_instance_storage_gb=900)
     assert "hlo1.24xl" not in result  # 1000 > 900
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
-        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=128, max_ram_gb=1024, max_gpu=8, min_instance_storage_gb=1, max_instance_storage_gb=1100)
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        result = core.resolve_instance_types(instance_types=[], min_vcpu=1, min_ram_gb=0.5, min_gpu=0, max_vcpu=128, max_ram_gb=1024, max_gpu=8, min_instance_storage_gb=1, max_instance_storage_gb=1100)
     assert "hlo1.24xl" in result  # 1000 <= 1100
 
 
@@ -336,36 +334,36 @@ def test_resolve_max_vcpu_less_than_min_raises():
     """ValueError raised when max_vcpu < min_vcpu."""
     mock_client = MagicMock()
     mock_client.describe_instance_types.return_value = {"InstanceTypes": []}
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
         with pytest.raises(ValueError, match="max_vcpu.*min_vcpu"):
-            core.resolve_instance_types(instance_types=[], min_vcpu=8, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=4, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=0, max_instance_storage_gb=256)
+            core.resolve_instance_types(instance_types=[], min_vcpu=8, min_ram_gb=0.5, min_gpu=0, max_vcpu=4, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=0, max_instance_storage_gb=256)
 
 
 def test_resolve_max_ram_less_than_min_raises():
     """ValueError raised when max_ram_gb < min_ram_gb."""
     mock_client = MagicMock()
     mock_client.describe_instance_types.return_value = {"InstanceTypes": []}
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
         with pytest.raises(ValueError, match="max_ram_gb.*min_ram_gb"):
-            core.resolve_instance_types(instance_types=[], min_vcpu=0, min_ram_gb=64, min_gpu=0, region="us-east-1", max_vcpu=64, max_ram_gb=32, max_gpu=8, min_instance_storage_gb=0, max_instance_storage_gb=256)
+            core.resolve_instance_types(instance_types=[], min_vcpu=0, min_ram_gb=64, min_gpu=0, max_vcpu=64, max_ram_gb=32, max_gpu=8, min_instance_storage_gb=0, max_instance_storage_gb=256)
 
 
 def test_resolve_max_gpu_less_than_min_raises():
     """ValueError raised when max_gpu < min_gpu."""
     mock_client = MagicMock()
     mock_client.describe_instance_types.return_value = {"InstanceTypes": []}
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
         with pytest.raises(ValueError, match="max_gpu.*min_gpu"):
-            core.resolve_instance_types(instance_types=[], min_vcpu=0, min_ram_gb=0.5, min_gpu=4, region="us-east-1", max_vcpu=64, max_ram_gb=128, max_gpu=2, min_instance_storage_gb=0, max_instance_storage_gb=256)
+            core.resolve_instance_types(instance_types=[], min_vcpu=0, min_ram_gb=0.5, min_gpu=4, max_vcpu=64, max_ram_gb=128, max_gpu=2, min_instance_storage_gb=0, max_instance_storage_gb=256)
 
 
 def test_resolve_max_storage_less_than_min_raises():
     """ValueError raised when max_instance_storage_gb < min_instance_storage_gb."""
     mock_client = MagicMock()
     mock_client.describe_instance_types.return_value = {"InstanceTypes": []}
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock_client):
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
         with pytest.raises(ValueError, match="max_instance_storage_gb.*min_instance_storage_gb"):
-            core.resolve_instance_types(instance_types=[], min_vcpu=0, min_ram_gb=0.5, min_gpu=0, region="us-east-1", max_vcpu=64, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=200, max_instance_storage_gb=100)
+            core.resolve_instance_types(instance_types=[], min_vcpu=0, min_ram_gb=0.5, min_gpu=0, max_vcpu=64, max_ram_gb=128, max_gpu=8, min_instance_storage_gb=200, max_instance_storage_gb=100)
 
 
 def test_negative_min_vcpu_triggers_warning(mock_ec2):
@@ -377,7 +375,6 @@ def test_negative_min_vcpu_triggers_warning(mock_ec2):
             min_vcpu=-1,
             min_ram_gb=0.5,
             min_gpu=0,
-            region="us-east-1",
             max_vcpu=64,
             max_ram_gb=128,
             max_gpu=8,
@@ -396,7 +393,6 @@ def test_negative_max_ram_gb_triggers_warning(mock_ec2):
             min_vcpu=0,
             min_ram_gb=-1.0,
             min_gpu=0,
-            region="us-east-1",
             max_vcpu=64,
             max_ram_gb=-0.5,
             max_gpu=8,

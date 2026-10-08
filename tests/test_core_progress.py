@@ -48,6 +48,7 @@ def test_progress_callback_receives_updates(mock_ec2):
         regions=["us-east-1"],
         days=30,
         progress_callback=callback,
+        product_description="Linux/UNIX",
     )
 
     assert len(result) == 2
@@ -72,6 +73,7 @@ def test_progress_callback_none_is_noop(mock_ec2):
         regions=["us-west-2"],
         days=30,
         progress_callback=None,
+        product_description="Linux/UNIX",
     )
 
     assert len(result) == 1
@@ -109,6 +111,7 @@ def test_progress_callback_format(mock_ec2):
         regions=["us-east-1", "us-east-2"],
         days=30,
         progress_callback=callback,
+        product_description="Linux/UNIX",
     )
 
     assert len(result) == 5
@@ -142,6 +145,7 @@ def test_progress_includes_all_pairs(mock_ec2):
         regions=["us-east-1", "us-west-2"],
         days=30,
         progress_callback=callback,
+        product_description="Linux/UNIX",
     )
 
     # 2 instance types × 2 regions = 4 pairs
@@ -164,6 +168,6 @@ def test_no_progress_unchanged_behavior(mock_ec2):
         "Regions": [{"RegionName": "us-east-1"}]
     }
 
-    result = core.fetch_spot_prices(["t2.nano"], regions=["us-east-1"], days=30)
+    result = core.fetch_spot_prices(["t2.nano"], regions=["us-east-1"], days=30, product_description="Linux/UNIX")
     assert len(result) == 1
     assert result[0]["InstanceType"] == "t2.nano"

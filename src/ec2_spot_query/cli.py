@@ -214,7 +214,6 @@ def main(
                     max_vcpu=max_vcpu,
                     max_ram_gb=max_ram,
                     max_gpu=max_gpu,
-                    region="us-east-1",
                     min_instance_storage_gb=min_instance_storage,
                     max_instance_storage_gb=max_instance_storage,
                 )

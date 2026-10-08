@@ -20,6 +20,10 @@ _EC2_CONFIG = botocore.config.Config(
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_REGION = "eu-west-1"
+_DEFAULT_CLIENT = boto3.client("ec2", region_name=DEFAULT_REGION, config=_EC2_CONFIG)
+BATCH_SIZE = 50
+
 
 def _get_retry_count(resp_meta: dict | None) -> int:
     """Extract retry count from response metadata, safe for MagicMock in tests."""
@@ -44,7 +48,6 @@ def resolve_instance_types(
     min_vcpu: int,
     min_ram_gb: float,
     min_gpu: int,
-    region: str,
     max_vcpu: int,
     max_ram_gb: float,
     max_gpu: int,
@@ -91,7 +94,7 @@ def resolve_instance_types(
     if max_instance_storage_gb < min_instance_storage_gb:
         raise ValueError(f"max_instance_storage_gb ({max_instance_storage_gb}) cannot be less than min_instance_storage_gb ({min_instance_storage_gb})")
 
-    client = boto3.client("ec2", region_name=region, config=_EC2_CONFIG)
+    client = _DEFAULT_CLIENT
     t0 = time.perf_counter()
     resp = client.describe_instance_types()
     elapsed = time.perf_counter() - t0
@@ -101,7 +104,7 @@ def resolve_instance_types(
     parts = [f"-> {record_count} types in {elapsed*1000:.0f}ms"]
     if retries > 0:
         parts.append(f"{retries} retries")
-    logger.debug("EC2 describe_instance_types (%s) %s", region, ", ".join(parts))
+    logger.debug("EC2 describe_instance_types (%s) %s", DEFAULT_REGION, ", ".join(parts))
 
     result: list[str] = []
     for inst in resp.get("InstanceTypes", []):
@@ -121,7 +124,7 @@ def resolve_instance_types(
             gpus >= min_gpu and gpus <= max_gpu and
             storage_gb >= min_instance_storage_gb and storage_gb <= max_instance_storage_gb):
             result.append(inst["InstanceType"])
-    return list(dict.fromkeys(result))  # deduplicate while preserving order
+    return list(set(result))
 
 
 def _fetch_region_prices(
@@ -197,8 +200,8 @@ def fetch_spot_prices(
     instance_types: list[str],
     regions: list[str],
     days: int,
+    product_description: str,
     progress_callback: Callable[[str, int], None] | None = None,
-    product_description: str = "Linux/UNIX",
 ) -> list[dict[str, Any]]:
     """Fetch spot price history concurrently across (instance_type, region) pairs.
 
@@ -207,17 +210,15 @@ def fetch_spot_prices(
     capped at 4 workers to stay under AWS service-level rate limits.
 
     Args:
+        product_description: Product description filter for spot price queries.
         progress_callback: Optional callable pair(name, total_records) -> None.
             Called after each (instance_type, region) fetch completes.
-        product_description: Product description filter for spot price queries.
-            Defaults to "Linux/UNIX".
     """
     now = dt.datetime.now(dt.timezone.utc)
     start = now - dt.timedelta(days=days)
     all_records: list[dict[str, Any]] = []
 
     # Batch instance types into chunks of up to 50
-    BATCH_SIZE = 50
     batches: list[list[str]] = []
     for i in range(0, len(instance_types), BATCH_SIZE):
         batches.append(instance_types[i:i + BATCH_SIZE])

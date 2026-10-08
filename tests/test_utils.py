@@ -15,7 +15,8 @@ from ec2_spot_query import core
 def mock_ec2(mocker):
     """Provide a mocked boto3 EC2 client used across core tests."""
     mock = MagicMock()
-    with patch("ec2_spot_query.core.boto3.client", return_value=mock):
+    with patch("ec2_spot_query.core.boto3.client", return_value=mock), \
+            patch("ec2_spot_query.core._DEFAULT_CLIENT", mock):
         yield mock
 
 
