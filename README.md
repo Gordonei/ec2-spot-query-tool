@@ -55,9 +55,8 @@ Sort options: `1h_mean`, `6h_mean`, `12h_mean`, `1d_mean`, `1w_mean`, `1m_mean`
 
 ```
 src/ec2_spot_query/
-├── main.py      # CLI entry point (typer)
-├── core.py      # Spot price fetching & metric computation
-├── cli.py       # Rich table rendering
+├── cli.py       # Typer CLI entry point + Rich table rendering
+├── core.py      # EC2 calls, spot price fetching & metric computation
 ├── cache.py     # On-disk TTL cache
 └── __init__.py  # Package metadata
 tests/           # pytest test suite
