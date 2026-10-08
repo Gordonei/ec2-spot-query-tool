@@ -13,29 +13,20 @@ import pytest
 from ec2_spot_query import cache
 
 
-class TestCachePaths:
+class TestCachePath:
     """Test cache path discovery logic."""
 
-    def test_paths_return_home_first(self):
-        """get_cache_paths() returns home path before project path."""
-        paths = cache.get_cache_paths()
+    def test_path_has_correct_filename(self):
+        """get_cache_path() returns a Path with the expected filename."""
+        p = cache.get_cache_path()
+        assert isinstance(p, Path)
+        assert p.name == cache.CACHE_FILENAME
+
+    def test_path_is_home_or_project(self):
+        """get_cache_path() is either the home or project cache path."""
         home_path = Path.home() / ".cache" / cache.CACHE_FILENAME
         project_path = Path.cwd() / ".cache" / cache.CACHE_FILENAME
-        assert len(paths) >= 1
-        if len(paths) >= 2:
-            assert paths[0] == home_path
-            assert paths[1] == project_path
-
-    def test_paths_has_at_least_one_entry(self):
-        """get_cache_paths() always returns at least one path."""
-        paths = cache.get_cache_paths()
-        assert len(paths) >= 1
-
-    def test_paths_have_correct_filename(self):
-        """All paths end with the expected cache filename."""
-        paths = cache.get_cache_paths()
-        for p in paths:
-            assert p.name == cache.CACHE_FILENAME
+        assert cache.get_cache_path() in (home_path, project_path)
 
 
 class TestCacheRoundtrip:
@@ -52,10 +43,9 @@ class TestCacheRoundtrip:
     def test_save_and_load_roundtrip(self, tmp_path):
         """save_cache and load_cache round-trip preserves data."""
         cache_file = tmp_path / "ec2-spot-cache.json"
-        mock_paths = [cache_file]
 
         data = {"key": "value", "number": 42}
-        with patch("ec2_spot_query.cache.get_cache_paths", return_value=mock_paths):
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             cache.save_cache("test_key", data, ttl_seconds=3600)
             result = cache.load_cache("test_key")
 
@@ -64,11 +54,10 @@ class TestCacheRoundtrip:
     def test_cache_expired_ttl(self, tmp_path):
         """Expired cache entries are not returned."""
         cache_file = tmp_path / "ec2-spot-cache.json"
-        mock_paths = [cache_file]
 
         data = {"key": "value"}
         expired_at = time.time() - 7200  # 2 hours ago
-        with patch("ec2_spot_query.cache.get_cache_paths", return_value=mock_paths):
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             cache.save_cache("test_key", data, ttl_seconds=3600)
 
         # Manually corrupt the expiry to simulate expiration
@@ -76,7 +65,7 @@ class TestCacheRoundtrip:
         content["test_key"]["expires_at"] = expired_at
         cache_file.write_text(json.dumps(content))
 
-        with patch("ec2_spot_query.cache.get_cache_paths", return_value=mock_paths):
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = cache.load_cache("test_key")
 
         assert result is None
@@ -84,10 +73,9 @@ class TestCacheRoundtrip:
     def test_cache_valid_ttl(self, tmp_path):
         """Valid (non-expired) cache entries are returned."""
         cache_file = tmp_path / "ec2-spot-cache.json"
-        mock_paths = [cache_file]
 
         data = {"key": "value"}
-        with patch("ec2_spot_query.cache.get_cache_paths", return_value=mock_paths):
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             cache.save_cache("test_key", data, ttl_seconds=3600)
             result = cache.load_cache("test_key")
 
@@ -96,26 +84,11 @@ class TestCacheRoundtrip:
     def test_cache_miss_returns_none(self, tmp_path):
         """Loading a non-existent key returns None."""
         cache_file = tmp_path / "ec2-spot-cache.json"
-        mock_paths = [cache_file]
 
-        with patch("ec2_spot_query.cache.get_cache_paths", return_value=mock_paths):
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = cache.load_cache("nonexistent_key")
 
         assert result is None
-
-    def test_clear_cache_removes_file(self, tmp_path):
-        """clear_cache() removes the cache file."""
-        cache_file = tmp_path / "ec2-spot-cache.json"
-        mock_paths = [cache_file]
-
-        data = {"key": "value"}
-        with patch("ec2_spot_query.cache.get_cache_paths", return_value=mock_paths):
-            cache.save_cache("test_key", data, ttl_seconds=3600)
-            assert cache_file.exists()
-            with patch("ec2_spot_query.cache.get_cache_paths", return_value=mock_paths):
-                cache.clear_cache()
-            assert not cache_file.exists()
-
 
 class TestCacheContextManager:
     """Test the _open_cache context manager."""
@@ -125,50 +98,50 @@ class TestCacheContextManager:
         cache_file = tmp_path / cache.CACHE_FILENAME
         cache_file.write_text(json.dumps({"existing": "data"}), encoding="utf-8")
 
-        with cache._open_cache(cache_file, mode="r") as data:
+        with cache._open_cache(cache_file, read_only=True) as data:
             assert data == {"existing": "data"}
 
     def test_open_cache_missing_file(self, tmp_path):
-        """_open_cache yields None when file does not exist."""
+        """_open_cache yields empty dict when file does not exist."""
         cache_file = tmp_path / cache.CACHE_FILENAME
         # Don't create the file
 
-        with cache._open_cache(cache_file, mode="r") as data:
-            assert data is None
+        with cache._open_cache(cache_file, read_only=True) as data:
+            assert data == {}
 
     def test_open_cache_corrupt_json(self, tmp_path):
-        """_open_cache yields None when file contains corrupt JSON."""
+        """_open_cache yields empty dict when file contains corrupt JSON."""
         cache_file = tmp_path / cache.CACHE_FILENAME
         cache_file.write_text("not valid json{{{", encoding="utf-8")
 
-        with cache._open_cache(cache_file, mode="r") as data:
-            assert data is None
+        with cache._open_cache(cache_file, read_only=True) as data:
+            assert data == {}
 
     def test_open_cache_write_mode_creates_dir(self, tmp_path):
-        """_open_cache write mode creates parent directory if needed."""
+        """_open_cache read_only=False creates parent directory on exit."""
         nested = tmp_path / "deep" / "nested" / cache.CACHE_FILENAME
         assert not nested.parent.exists()
 
-        with cache._open_cache(nested, mode="w") as data:
+        with cache._open_cache(nested, read_only=False) as data:
             assert isinstance(data, dict)
-            assert nested.parent.exists()
+        assert nested.parent.exists()
 
     def test_open_cache_write_mode_persists_data(self, tmp_path):
-        """_open_cache write mode persists modified data after context exit."""
+        """_open_cache read_only=False persists modified data after context exit."""
         cache_file = tmp_path / cache.CACHE_FILENAME
 
-        with cache._open_cache(cache_file, mode="w") as data:
+        with cache._open_cache(cache_file, read_only=False) as data:
             data["new_key"] = "new_value"
 
         content = json.loads(cache_file.read_text(encoding="utf-8"))
         assert content == {"new_key": "new_value"}
 
     def test_open_cache_write_mode_preserves_existing(self, tmp_path):
-        """_open_cache write mode preserves existing entries."""
+        """_open_cache read_only=False preserves existing entries."""
         cache_file = tmp_path / cache.CACHE_FILENAME
         cache_file.write_text(json.dumps({"existing": "data"}), encoding="utf-8")
 
-        with cache._open_cache(cache_file, mode="w") as data:
+        with cache._open_cache(cache_file, read_only=False) as data:
             data["new_key"] = "new_value"
 
         content = json.loads(cache_file.read_text(encoding="utf-8"))

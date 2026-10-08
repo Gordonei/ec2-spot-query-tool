@@ -110,7 +110,7 @@ class TestCacheHitFlow:
         mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
         mocker.patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_ec2)
 
-        with patch("ec2_spot_query.cache.get_cache_paths", return_value=[cache_file]):
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
                 ["--instance-types", "t3.micro", "--regions", "us-east-1"],
@@ -145,7 +145,7 @@ class TestCacheMissFlow:
         mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
         mocker.patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_ec2)
 
-        with patch("ec2_spot_query.cache.get_cache_paths", return_value=[cache_file]):
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
                 ["--instance-types", "t3.micro", "--regions", "us-east-1"],

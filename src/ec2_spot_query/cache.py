@@ -15,61 +15,42 @@ INSTANCE_TTL_SECONDS = 31536000  # 1 year (365 days)
 REGIONS_TTL_SECONDS = 2592000  # 1 month (30 days)
 
 
-def get_cache_paths() -> list[Path]:
-    """Return ordered list of candidate cache file paths.
+def get_cache_path() -> Path:
+    """Return the single cache file path.
 
     Tries ``~/.cache/ec2-spot-cache.json`` first, then
     ``./.cache/ec2-spot-cache.json``. Falls back to the home path if
     neither is writable.
     """
-    candidates: list[Path] = []
     home_dir = Path.home() / ".cache"
     if _is_writable_or_can_become(home_dir):
-        candidates.append(home_dir / CACHE_FILENAME)
+        return home_dir / CACHE_FILENAME
     project_dir = Path.cwd() / ".cache"
     if _is_writable_or_can_become(project_dir):
-        candidates.append(project_dir / CACHE_FILENAME)
-    if not candidates:
-        candidates.append(home_dir / CACHE_FILENAME)
-    return candidates
+        return project_dir / CACHE_FILENAME
+    return home_dir / CACHE_FILENAME
 
 
 @contextmanager
-def _open_cache(path: Path, mode: str = "r"):
+def _open_cache(path: Path, read_only: bool = True):
     """Context manager for cache file I/O.
 
-    In *read* mode (``"r"``), yields the parsed JSON dict or ``None`` if
-    the file does not exist or contains corrupt JSON.
-
-    In *write* mode (``"w"``), yields an empty dict or the existing data
-    dict.  Modifications to the yielded dict are persisted to disk when
-    the context exits (parent directory is created automatically).
+    Yields the parsed JSON dict, or ``{}`` when the file is missing or
+    contains corrupt JSON.  When *read_only* is False, modifications to
+    the yielded dict are persisted to disk on exit (the parent directory
+    is created automatically).
     """
-    if mode == "r":
-        if not path.exists():
-            yield None
-            return
+    data: dict = {}
+    if path.exists():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            yield data
         except (json.JSONDecodeError, KeyError, ValueError, TypeError):
-            yield None
-    elif mode == "w":
-        parent = path.parent
+            data = {}
+    yield data
+    if not read_only:
         try:
-            parent.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            yield {}
-            return
-        existing: dict = {}
-        if path.exists():
-            try:
-                existing = json.loads(path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, ValueError, TypeError):
-                existing = {}
-        yield existing
-        try:
-            path.write_text(json.dumps(existing, default=str), encoding="utf-8")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, default=str), encoding="utf-8")
         except (OSError, TypeError, ValueError):
             pass
 
@@ -88,12 +69,10 @@ def load_cache(key: str, ttl_seconds: float = SPOT_TTL_SECONDS) -> Any | None:
 
     Returns ``None`` if the key is not found or the entry has expired.
     """
-    for path in get_cache_paths():
-        with _open_cache(path, mode="r") as data:
-            if data is not None and key in data:
-                entry = data[key]
-                if time.time() < entry.get("expires_at", 0):
-                    return entry["data"]
+    with _open_cache(get_cache_path(), read_only=True) as data:
+        entry = data.get(key)
+        if entry is not None and time.time() < entry.get("expires_at", 0):
+            return entry["data"]
     return None
 
 
@@ -103,21 +82,8 @@ def save_cache(key: str, data: Any, ttl_seconds: float = SPOT_TTL_SECONDS) -> No
         "data": data,
         "expires_at": time.time() + ttl_seconds,
     }
-    for path in get_cache_paths():
-        with _open_cache(path, mode="w") as existing:
-            existing[key] = entry
-        return
-
-
-def clear_cache() -> None:
-    """Remove the cache file at the first writable path."""
-    for path in get_cache_paths():
-        try:
-            if path.exists():
-                path.unlink()
-            return
-        except (OSError, PermissionError):
-            continue
+    with _open_cache(get_cache_path(), read_only=False) as store:
+        store[key] = entry
 
 
 def make_spot_cache_key(instance_types: list[str], regions: list[str]) -> str:
