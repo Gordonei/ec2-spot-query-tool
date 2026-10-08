@@ -370,7 +370,7 @@ def aggregate_by_region(
     result = []
     for (itype, region), group in df.groupby(["instance_type", "region"]):
         best = group.loc[group["current_price"].idxmin()].copy()
-        row: dict[str, Any] = {"region_az": region, "instance_type": itype}
+        row: dict[str, Any] = {"region_az": region, "region": region, "instance_type": itype}
         for col in df.columns:
             if col in ("region_az", "region", "instance_type"):
                 continue

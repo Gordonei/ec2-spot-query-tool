@@ -17,6 +17,7 @@ def _sample_df() -> pd.DataFrame:
     """Return a DataFrame shaped like compute_metrics output."""
     return pd.DataFrame([{
         "region_az": "us-east-1/us-east-1a",
+        "region": "us-east-1",
         "instance_type": "t3.micro",
         "current_price": 0.012,
         "1h_mean": 0.013, "1h_vol": 0.0010,
@@ -27,6 +28,7 @@ def _sample_df() -> pd.DataFrame:
         "1m_mean": 0.015, "1m_vol": 0.0040,
     }, {
         "region_az": "us-east-1/us-east-1b",
+        "region": "us-east-1",
         "instance_type": "t3.large",
         "current_price": 0.048,
         "1h_mean": 0.049, "1h_vol": 0.0020,

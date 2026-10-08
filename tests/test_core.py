@@ -196,6 +196,8 @@ def test_aggregate_by_region_selects_best_az():
     assert len(result) == 1
     assert result.iloc[0]["region_az"] == "us-east-1"
     assert result.iloc[0]["current_price"] == 0.012
+    assert "region" in result.columns
+    assert result.iloc[0]["region"] == "us-east-1"
 
 
 def test_aggregate_by_region_preserves_metrics():
@@ -238,6 +240,9 @@ def test_aggregate_by_region_no_duplicate_instance_types():
     regions = result["region_az"].tolist()
     assert "us-east-1" in regions
     assert "us-west-2" in regions
+    region_cols = result["region"].tolist()
+    assert "us-east-1" in region_cols
+    assert "us-west-2" in region_cols
 
 
 def test_aggregate_by_region_empty():

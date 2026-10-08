@@ -117,7 +117,7 @@ def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int =
 
     for _, row in result_df.iterrows():
         table.add_row(
-            str(row["region_az"]),
+            str(row["region_az"] if per_az else row["region"]),
             str(row["instance_type"]),
             f"${row['current_price']:.3f}",
             f"{row['1h_mean']:.3f}",
