@@ -44,6 +44,7 @@ class TestFullWorkflow:
         """Full pipeline: resolve instances → fetch → compute → render."""
         mock_ec2 = _make_mock_ec2()
         mock = mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
+        mocker.patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_ec2)
         result = runner.invoke(
             app,
             ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"],
@@ -70,6 +71,7 @@ class TestAllRegions:
             regions=[{"RegionName": "us-east-1"}, {"RegionName": "eu-west-1"}],
         )
         mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
+        mocker.patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_ec2)
         result = runner.invoke(
             app,
             ["--instance-types", "t3.micro", "--all-regions", "--no-cache"],
@@ -106,6 +108,7 @@ class TestCacheHitFlow:
 
         mock_ec2 = _make_mock_ec2()
         mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
+        mocker.patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_ec2)
 
         with patch("ec2_spot_query.cache.get_cache_paths", return_value=[cache_file]):
             result = runner.invoke(
@@ -140,6 +143,7 @@ class TestCacheMissFlow:
         ]
         mock_ec2 = _make_mock_ec2(spot_records=spot_records)
         mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
+        mocker.patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_ec2)
 
         with patch("ec2_spot_query.cache.get_cache_paths", return_value=[cache_file]):
             result = runner.invoke(
@@ -165,6 +169,7 @@ class TestProgressFlag:
         """--progress defaults to false."""
         mock_ec2 = _make_mock_ec2()
         mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
+        mocker.patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_ec2)
         result = runner.invoke(app, ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"])
         assert result.exit_code == 0
 
@@ -182,6 +187,7 @@ class TestDebugFlag:
         """--debug enables detailed logging."""
         mock_ec2 = _make_mock_ec2()
         mocker.patch("ec2_spot_query.core.boto3.client", return_value=mock_ec2)
+        mocker.patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_ec2)
         result = runner.invoke(
             app,
             ["--instance-types", "t3.micro", "--regions", "us-east-1", "--debug", "--no-cache"],

@@ -7,7 +7,6 @@ import sys
 import time
 from collections.abc import Callable
 
-import boto3
 import pandas as pd
 import typer
 from rich.console import Console
@@ -221,19 +220,24 @@ def main(
                     cache.save_cache(resolve_cache_key, ipts, ttl_seconds=cache.INSTANCE_TTL_SECONDS)
             _log("complete", f"Found {len(ipts)} types: {', '.join(ipts)}", {"types": ipts})
 
-        # Resolve regions (discover from AWS if --all-regions)
+        # Resolve regions (discover from AWS if --all-regions, cached)
         regions_to_use = None if all_regions else regions
         if not regions_to_use:
             _log("query", "Fetching region list from AWS")
-            ec2_client = boto3.client("ec2", region_name="us-east-1", config=core._EC2_CONFIG)
-            resp = ec2_client.describe_regions()
-            regions_to_use = [r["RegionName"] for r in resp.get("Regions", [])]
-            if not regions_to_use:
-                raise typer.Exit(code=1)
-            _log("info", f"Found {len(regions_to_use)} regions")
+            regions_cache_key = "regions"
+            if not no_cache:
+                regions_to_use = cache.load_cache(regions_cache_key, ttl_seconds=cache.REGIONS_TTL_SECONDS)
+                if regions_to_use:
+                    _log("info", f"Using cached region list ({len(regions_to_use)} regions)", {"regions": regions_to_use})
+            if not regions_to_use or no_cache_lookup:
+                regions_to_use = core.list_regions()
+                if not regions_to_use:
+                    raise typer.Exit(code=1)
+                if not no_cache:
+                    cache.save_cache(regions_cache_key, regions_to_use, ttl_seconds=cache.REGIONS_TTL_SECONDS)
+                _log("info", f"Found {len(regions_to_use)} regions")
 
         regions_list = sorted(regions_to_use)
-        regions_str = ",".join(regions_list)
         total_pairs = len(ipts) * len(regions_list)
 
         if total_pairs == 0:

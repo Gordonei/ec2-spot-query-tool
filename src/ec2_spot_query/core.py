@@ -127,6 +127,16 @@ def resolve_instance_types(
     return list(set(result))
 
 
+def list_regions() -> list[str]:
+    """Return all AWS region names.
+
+    ``describe_regions`` is a global call — the result is identical from
+    any region, so the shared default-region client is used.
+    """
+    resp = _DEFAULT_CLIENT.describe_regions()
+    return [r["RegionName"] for r in resp.get("Regions", [])]
+
+
 def _fetch_region_prices(
     region: str,
     instance_types: list[str],

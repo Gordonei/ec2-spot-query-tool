@@ -171,6 +171,14 @@ def test_resolve_instance_types_filters_instances():
     assert "t2.micro" not in result
 
 
+def test_list_regions(mock_ec2):
+    """list_regions returns region names from describe_regions."""
+    mock_ec2.describe_regions.return_value = {
+        "Regions": [{"RegionName": "us-east-1"}, {"RegionName": "eu-west-1"}]
+    }
+    assert core.list_regions() == ["us-east-1", "eu-west-1"]
+
+
 def test_aggregate_by_region_selects_best_az():
     """For each (instance_type, region), the AZ with min current_price is selected."""
     df = pd.DataFrame([{

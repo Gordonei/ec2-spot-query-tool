@@ -12,6 +12,7 @@ from typing import Any
 CACHE_FILENAME = "ec2-spot-cache.json"
 SPOT_TTL_SECONDS = 3600  # 1 hour
 INSTANCE_TTL_SECONDS = 31536000  # 1 year (365 days)
+REGIONS_TTL_SECONDS = 2592000  # 1 month (30 days)
 
 
 def get_cache_paths() -> list[Path]:
