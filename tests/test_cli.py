@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+pytest_plugins = ("tests.test_utils",)
+
 import io
 import re
 
 import pandas as pd
 import pytest
 from rich.console import Console
+from typer.testing import CliRunner
 from unittest.mock import patch
 
 from ec2_spot_query import cli
+from ec2_spot_query.cli import app
+
+
+runner = CliRunner()
 
 
 def _sample_df() -> pd.DataFrame:
@@ -118,3 +125,34 @@ def test_render_table_without_limit(capsys):
     output = buf.getvalue()
     assert "t3.micro" in output
     assert "t3.large" in output
+
+
+def test_help_flag_lists_all_options():
+    """--help exits 0 and lists the expected options."""
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    for flag in [
+        "--instance-types", "--regions", "--all-regions", "--sort-by",
+        "--limit", "--per-az", "--no-cache", "--no-cache-lookup",
+        "--min-vcpu", "--max-vcpu", "--min-ram", "--max-ram",
+        "--min-gpu", "--max-gpu", "--min-instance-storage", "--max-instance-storage",
+        "--progress", "--debug",
+    ]:
+        assert flag in result.stdout, f"Missing {flag} in --help output"
+
+
+def test_cli_invoke_no_errors(mock_ec2):
+    """Invoking with instance types exits cleanly."""
+    mock_ec2.describe_spot_price_history.return_value = {
+        "SpotPriceHistory": [
+            {
+                "InstanceId": "us-east-1:us-east-1a",
+                "AvailabilityZone": "us-east-1a",
+                "InstanceType": "t3.micro",
+                "SpotPrice": "0.012",
+                "Timestamp": "2025-10-01T00:00:00Z",
+            }
+        ]
+    }
+    result = runner.invoke(app, ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"])
+    assert result.exit_code == 0
