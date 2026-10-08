@@ -86,11 +86,10 @@ def save_cache(key: str, data: Any, ttl_seconds: float = SPOT_TTL_SECONDS) -> No
         store[key] = entry
 
 
-def make_spot_cache_key(instance_types: list[str], regions: list[str]) -> str:
-    """Build a deterministic cache key from instance types and regions.
+def make_spot_cache_key(instance_type: str, regions: list[str]) -> str:
+    """Build a deterministic per-instance-type cache key.
 
-    Both lists are sorted so that different orderings produce the same key.
+    Regions are sorted so that different orderings produce the same key.
     """
-    sorted_instances = ",".join(sorted(instance_types))
     sorted_regions = ",".join(sorted(regions))
-    return f"spot:{sorted_instances}:{sorted_regions}"
+    return f"spot:{instance_type}:{sorted_regions}"

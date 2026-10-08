@@ -180,24 +180,15 @@ class TestCacheWritable:
 
 
 class TestCacheKey:
-    """Test cache key includes region."""
+    """Test per-instance-type cache key format."""
 
-    def test_spot_cache_key_includes_regions(self):
-        """Cache key format includes regions."""
-        key = cache.make_spot_cache_key(["t3.micro", "t3.large"], ["us-east-1", "eu-west-1"])
-        assert "us-east-1" in key
-        assert "eu-west-1" in key
-        assert "t3.micro" in key
-        assert "t3.large" in key
+    def test_spot_cache_key_format(self):
+        """Key is spot:<type>:<sorted, comma-joined regions>."""
+        key = cache.make_spot_cache_key("t3.micro", ["us-east-1", "eu-west-1"])
+        assert key == "spot:t3.micro:eu-west-1,us-east-1"
 
     def test_cache_key_sorted_regions(self):
         """Cache key regions are sorted."""
-        key1 = cache.make_spot_cache_key(["t3.micro"], ["eu-west-1", "us-east-1"])
-        key2 = cache.make_spot_cache_key(["t3.micro"], ["us-east-1", "eu-west-1"])
-        assert key1 == key2
-
-    def test_cache_key_sorted_instances(self):
-        """Cache key instance types are sorted."""
-        key1 = cache.make_spot_cache_key(["t3.large", "t3.micro"], ["us-east-1"])
-        key2 = cache.make_spot_cache_key(["t3.micro", "t3.large"], ["us-east-1"])
+        key1 = cache.make_spot_cache_key("t3.micro", ["eu-west-1", "us-east-1"])
+        key2 = cache.make_spot_cache_key("t3.micro", ["us-east-1", "eu-west-1"])
         assert key1 == key2

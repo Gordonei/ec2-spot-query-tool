@@ -246,57 +246,67 @@ def main(
         else:
             _log("info", f"Querying {total_pairs} instance×region pairs ({len(ipts)} types × {len(regions_list)} regions)")
 
-        # Fetch spot prices (with cache)
-        spot_cache_key = cache.make_spot_cache_key(ipts, regions_list)
-        raw = None
-        if not no_cache:
-            raw = cache.load_cache(spot_cache_key, ttl_seconds=cache.SPOT_TTL_SECONDS)
-            if raw:
-                _log("info", f"Using cached spot prices ({len(raw):,} records)", {"records": len(raw)})
+        # Fetch spot prices (per-instance-type cache)
+        raw: list[dict] = []
+        if total_pairs > 0:
+            done: dict[str, int] = {"count": 0}
 
-        if raw is None or no_cache_lookup:
-            if total_pairs > 0:
-                done: dict[str, int] = {"count": 0}
+            def _wrap_progress_callback(pair_name: str, total_records: int) -> None:
+                done["count"] += 1
+                progress.update(  # type: ignore[call-arg]
+                    task,
+                    advance=1,
+                    done=done["count"],
+                    records=total_records,
+                    description=f"Fetching {pair_name}...",
+                    refresh=True,
+                )
 
-                def _wrap_progress_callback(pair_name: str, total_records: int) -> None:
-                    done["count"] += 1
-                    progress.update(  # type: ignore[call-arg]
-                        task,
-                        advance=1,
-                        done=done["count"],
-                        records=total_records,
-                        description=f"Fetching {pair_name}...",
-                        refresh=True,
-                    )
+            t0 = time.time()
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[blue]Fetching spot prices...[/blue]"),
+                BarColumn(),
+                TextColumn(
+                    "[dim]{task.fields[records]} records ({task.fields[done]}/{task.fields[total_pairs]} pairs)[/dim]"
+                ),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+            ) as progress:
+                task = progress.add_task(
+                    "fetching", total=total_pairs, done=0, records=0, total_pairs=total_pairs
+                )
 
-                t0 = time.time()
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[blue]Fetching spot prices...[/blue]"),
-                    BarColumn(),
-                    TextColumn(
-                        "[dim]{task.fields[records]} records ({task.fields[done]}/{task.fields[total_pairs]} pairs)[/dim]"
-                    ),
-                    TimeElapsedColumn(),
-                    TimeRemainingColumn(),
-                ) as progress:
-                    task = progress.add_task(
-                        "fetching", total=total_pairs, done=0, records=0, total_pairs=total_pairs
-                    )
-                    raw = core.fetch_spot_prices(
-                        ipts,
+                for itype in ipts:
+                    spot_cache_key = cache.make_spot_cache_key(itype, regions_list)
+                    cached = None
+                    if not no_cache:
+                        cached = cache.load_cache(spot_cache_key, ttl_seconds=cache.SPOT_TTL_SECONDS)
+                    if cached and not no_cache_lookup:
+                        raw.extend(cached)
+                        for _ in regions_list:
+                            done["count"] += 1
+                        progress.update(
+                            task,
+                            advance=len(regions_list),
+                            done=done["count"],
+                            refresh=True,
+                        )
+                        _log("info", f"Using cached spot prices for {itype} ({len(cached):,} records)", {"records": len(cached)})
+                        continue
+                    batch = core.fetch_spot_prices(
+                        [itype],
                         regions=regions_to_use,
                         days=30,
                         progress_callback=_wrap_progress_callback,
                         product_description=product_description,
                     )
-                    elapsed = time.time() - t0
-
                     if not no_cache:
-                        cache.save_cache(spot_cache_key, raw, ttl_seconds=cache.SPOT_TTL_SECONDS)
-                    _log("complete", f"Fetched {len(raw):,} records in {elapsed:.1f}s", {"records": len(raw)})
-        else:
-            _log("info", f"Using cached spot prices ({len(raw):,} records)", {"records": len(raw)})
+                        cache.save_cache(spot_cache_key, batch, ttl_seconds=cache.SPOT_TTL_SECONDS)
+                    raw.extend(batch)
+
+            elapsed = time.time() - t0
+            _log("complete", f"Fetched {len(raw):,} records in {elapsed:.1f}s", {"records": len(raw)})
 
         # Compute metrics
         _log("query", f"Computing metrics for {len(raw):,} price points across 6 time windows")
