@@ -809,3 +809,108 @@ def test_no_progress_unchanged_behavior(mock_ec2):
     result = core.fetch_spot_prices(["t2.nano"], regions=["us-east-1"], days=30, product_description="Linux/UNIX")
     assert len(result) == 1
     assert result[0]["InstanceType"] == "t2.nano"
+
+
+# ---------------------------------------------------------------------------
+# Glob expansion tests
+# ---------------------------------------------------------------------------
+
+_REGIONS = ["us-east-1", "us-west-2", "eu-west-1", "eu-west-2", "eu-central-1", "eu-north-1", "ap-southeast-2"]
+_TYPES = ["t3.micro", "t3.large", "m7g.xlarge", "m7g.2xlarge", "m7i.xlarge", "inf2.xlarge", "inf2.2xlarge", "inf2.48xlarge"]
+
+
+def test_has_glob_true():
+    """Patterns containing *, ? or [ are glob patterns."""
+    assert core.has_glob("eu-*")
+    assert core.has_glob("inf2.*")
+    assert core.has_glob("us-ea?t-1")
+    assert core.has_glob("m7[gr].large")
+    assert core.has_glob("a[!b]c")
+
+
+def test_has_glob_false():
+    """Plain names without glob characters are not glob patterns."""
+    assert not core.has_glob("t3.micro")
+    assert not core.has_glob("eu-west-1")
+    assert not core.has_glob("")
+
+
+def test_match_names_star():
+    """Star pattern matches all names with the prefix."""
+    assert core.match_names(_REGIONS, "eu-*") == ["eu-central-1", "eu-north-1", "eu-west-1", "eu-west-2"]
+
+
+def test_match_names_question_mark():
+    """Question mark matches exactly one character."""
+    assert core.match_names(_TYPES, "t3.mi?ro") == ["t3.micro"]
+    assert core.match_names(_TYPES, "t3.mi?o") == []
+
+
+def test_match_names_bracket():
+    """Bracket expression matches any character in the set (and negation)."""
+    assert core.match_names(_TYPES, "m7[gi].xlarge") == ["m7g.xlarge", "m7i.xlarge"]
+    assert core.match_names(_TYPES, "m7[!i].xlarge") == ["m7g.xlarge"]
+
+
+def test_match_names_no_match():
+    """A pattern matching nothing returns an empty list."""
+    assert core.match_names(_REGIONS, "zzz-*") == []
+
+
+def test_match_names_sorted():
+    """Results are returned sorted regardless of input order."""
+    shuffled = list(reversed(_TYPES))
+    assert core.match_names(shuffled, "inf2.*") == ["inf2.2xlarge", "inf2.48xlarge", "inf2.xlarge"]
+
+
+def test_match_names_case_sensitive():
+    """Matching is case-sensitive: uppercase patterns match nothing."""
+    assert core.match_names(_TYPES, "INF2.*") == []
+    assert core.match_names(_TYPES, "Inf2.*") == []
+
+
+def test_expand_names_literal_passthrough():
+    """Patterns without glob characters pass through as-is, even if absent from names."""
+    assert core.expand_names(_REGIONS, ["us-east-1"]) == ["us-east-1"]
+    assert core.expand_names(_REGIONS, ["us-east-1", "us-iso-east-1"]) == ["us-east-1", "us-iso-east-1"]
+
+
+def test_expand_names_glob_only():
+    """Glob patterns expand against the name list."""
+    assert core.expand_names(_REGIONS, ["eu-*"]) == ["eu-central-1", "eu-north-1", "eu-west-1", "eu-west-2"]
+
+
+def test_expand_names_mixed_literals_and_globs():
+    """Literals and globs are unioned."""
+    result = core.expand_names(_TYPES, ["t3.micro", "inf2.*"])
+    assert result == ["inf2.2xlarge", "inf2.48xlarge", "inf2.xlarge", "t3.micro"]
+
+
+def test_expand_names_deduplicates():
+    """Overlapping patterns produce no duplicates."""
+    result = core.expand_names(_TYPES, ["inf2.*", "inf2.xlarge", "t3.*", "t3.micro"])
+    assert result == ["inf2.2xlarge", "inf2.48xlarge", "inf2.xlarge", "t3.large", "t3.micro"]
+    assert len(result) == len(set(result))
+
+
+def test_expand_names_no_match():
+    """All-glob input with no matches returns an empty list."""
+    assert core.expand_names(_REGIONS, ["zzz-*"]) == []
+
+
+def test_expand_names_mixed_no_match_keeps_literals():
+    """A glob with no matches does not discard literal patterns."""
+    assert core.expand_names(_REGIONS, ["zzz-*", "eu-west-1"]) == ["eu-west-1"]
+
+
+def test_list_instance_types(mock_ec2):
+    """list_instance_types returns all instance type names from describe_instance_types."""
+    mock_ec2.describe_instance_types.return_value = {
+        "InstanceTypes": [
+            {"InstanceType": "t3.micro"},
+            {"InstanceType": "inf2.xlarge"},
+            {"InstanceType": "inf2.2xlarge"},
+        ]
+    }
+    assert core.list_instance_types() == ["t3.micro", "inf2.xlarge", "inf2.2xlarge"]
+    mock_ec2.describe_instance_types.assert_called_once()

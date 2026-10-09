@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import fnmatch
 import logging
 import time
 import warnings
@@ -86,6 +87,37 @@ def map_architectures(arch_input: str | list[str] | None) -> list[str] | None:
             if value not in mapped:
                 mapped.append(value)
     return mapped or None
+
+
+_GLOB_CHARS = frozenset("*?[")
+
+
+def has_glob(pattern: str) -> bool:
+    """Return True if *pattern* contains fnmatch glob characters (*, ?, [)."""
+    return any(char in _GLOB_CHARS for char in pattern)
+
+
+def match_names(names: list[str], pattern: str) -> list[str]:
+    """Return the names matching *pattern* (case-sensitive fnmatch), sorted."""
+    return sorted(name for name in names if fnmatch.fnmatchcase(name, pattern))
+
+
+def expand_names(names: list[str], patterns: list[str]) -> list[str]:
+    """Expand *patterns* against *names*.
+
+    Patterns containing glob characters are matched case-sensitively against
+    *names*; patterns without glob characters pass through as-is (even if
+    absent from *names*).  Returns the deduplicated, sorted union.
+    """
+    matched: set[str] = set()
+    for pattern in patterns:
+        if not pattern:
+            continue
+        if has_glob(pattern):
+            matched.update(match_names(names, pattern))
+        else:
+            matched.add(pattern)
+    return sorted(matched)
 
 
 def _get_retry_count(resp_meta: dict | None) -> int:
@@ -218,6 +250,17 @@ def list_regions() -> list[str]:
     """
     resp = _DEFAULT_CLIENT.describe_regions()
     return [r["RegionName"] for r in resp.get("Regions", [])]
+
+
+def list_instance_types() -> list[str]:
+    """Return all EC2 instance type names.
+
+    ``describe_instance_types`` is queried without filters on the shared
+    default-region client (a global catalog).  Used to expand glob patterns
+    such as ``inf2.*``.
+    """
+    resp = _DEFAULT_CLIENT.describe_instance_types()
+    return [inst["InstanceType"] for inst in resp.get("InstanceTypes", [])]
 
 
 def _fetch_region_prices(
