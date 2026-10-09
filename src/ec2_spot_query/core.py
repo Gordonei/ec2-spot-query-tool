@@ -24,6 +24,69 @@ DEFAULT_REGION = "eu-west-1"
 _DEFAULT_CLIENT = boto3.client("ec2", region_name=DEFAULT_REGION, config=_EC2_CONFIG)
 BATCH_SIZE = 50
 
+# Official AWS EC2 processor architecture values
+_OFFICIAL_ARCHITECTURES = frozenset({
+    "x86_64",
+    "arm64",
+    "x86_64_mac",
+    "arm64_mac",
+    "riscv64",
+})
+
+# User-friendly aliases -> official architecture values
+_ARCH_ALIASES: dict[str, tuple[str, ...]] = {
+    "x86": ("x86_64",),
+    "intel": ("x86_64",),
+    "amd": ("x86_64",),
+    "arm": ("arm64",),
+    "graviton": ("arm64",),
+    "aarch64": ("arm64",),
+    "mac": ("arm64_mac", "x86_64_mac"),
+}
+
+
+def map_architectures(arch_input: str | list[str] | None) -> list[str] | None:
+    """Map user-friendly architecture aliases to official AWS EC2 values.
+
+    Accepts a single string or a list of strings (case-insensitive).
+    ``None`` returns ``None`` (no architecture filter).
+
+    Aliases:
+        x86, x86_64, intel, amd  -> x86_64
+        arm, arm64, graviton, aarch64 -> arm64
+        mac                      -> arm64_mac, x86_64_mac
+
+    Official AWS values (x86_64, arm64, x86_64_mac, arm64_mac, riscv64)
+    pass through unchanged.  Results are deduplicated, preserving order.
+
+    Raises:
+        ValueError: If a token is neither a known alias nor an official
+            architecture value.
+    """
+    if arch_input is None:
+        return None
+    if isinstance(arch_input, str):
+        tokens = [arch_input]
+    else:
+        tokens = list(arch_input)
+
+    mapped: list[str] = []
+    for token in tokens:
+        key = token.strip().lower()
+        if not key:
+            continue
+        if key in _OFFICIAL_ARCHITECTURES:
+            values = (key,)
+        elif key in _ARCH_ALIASES:
+            values = _ARCH_ALIASES[key]
+        else:
+            valid = ", ".join(sorted(set(_ARCH_ALIASES) | _OFFICIAL_ARCHITECTURES))
+            raise ValueError(f"Unknown architecture {token!r}. Valid values: {valid}")
+        for value in values:
+            if value not in mapped:
+                mapped.append(value)
+    return mapped or None
+
 
 def _get_retry_count(resp_meta: dict | None) -> int:
     """Extract retry count from response metadata, safe for MagicMock in tests."""
@@ -53,6 +116,7 @@ def resolve_instance_types(
     max_gpu: int,
     min_instance_storage_gb: float,
     max_instance_storage_gb: float,
+    architectures: list[str] | None = None,
 ) -> list[str]:
     """Resolve target instance types from input or EC2 describe_instance_types call.
 
@@ -60,8 +124,14 @@ def resolve_instance_types(
     Otherwise ``describe_instance_types`` is queried and filtered by hardware
     constraints (min and max for vCPUs, RAM, GPU, and instance storage).
 
+    When *architectures* is non-empty, a ``processor-info.supported-architecture``
+    filter is passed to ``describe_instance_types`` so that unwanted
+    architectures never reach the spot-price fetch stage.
+
     Raises:
-        ValueError: If any max parameter is less than its corresponding min parameter.
+        ValueError: If any max parameter is less than its corresponding min
+            parameter, or if *architectures* contains a value that is not an
+            official AWS architecture.
     """
     if instance_types:
         return [t for t in instance_types if t]
@@ -94,9 +164,20 @@ def resolve_instance_types(
     if max_instance_storage_gb < min_instance_storage_gb:
         raise ValueError(f"max_instance_storage_gb ({max_instance_storage_gb}) cannot be less than min_instance_storage_gb ({min_instance_storage_gb})")
 
+    if architectures:
+        for arch in architectures:
+            if arch not in _OFFICIAL_ARCHITECTURES:
+                valid = ", ".join(sorted(_OFFICIAL_ARCHITECTURES))
+                raise ValueError(f"Unsupported architecture {arch!r}. Valid values: {valid}")
+
     client = _DEFAULT_CLIENT
     t0 = time.perf_counter()
-    resp = client.describe_instance_types()
+    describe_kwargs: dict[str, Any] = {}
+    if architectures:
+        describe_kwargs["Filters"] = [
+            {"Name": "processor-info.supported-architecture", "Values": list(architectures)},
+        ]
+    resp = client.describe_instance_types(**describe_kwargs)
     elapsed = time.perf_counter() - t0
     record_count = len(resp.get("InstanceTypes", []))
     resp_meta = resp.get("ResponseMetadata", {})
@@ -104,6 +185,8 @@ def resolve_instance_types(
     parts = [f"-> {record_count} types in {elapsed*1000:.0f}ms"]
     if retries > 0:
         parts.append(f"{retries} retries")
+    if architectures:
+        parts.append(f"arch[{','.join(architectures)}]")
     logger.debug("EC2 describe_instance_types (%s) %s", DEFAULT_REGION, ", ".join(parts))
 
     result: list[str] = []

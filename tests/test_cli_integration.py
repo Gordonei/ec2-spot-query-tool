@@ -127,6 +127,107 @@ class TestCacheMissFlow:
         assert "spot:t3.micro:us-east-1" in saved
 
 
+class TestArchFilter:
+    """Test --arch / --architecture option wiring."""
+
+    def test_arch_alias_passed_to_resolve(self, mocker):
+        """--arch graviton maps to arm64 and reaches resolve_instance_types."""
+        mock_resolve = mocker.patch(
+            "ec2_spot_query.core.resolve_instance_types", return_value=["c6g.large"]
+        )
+        mocker.patch("ec2_spot_query.core.fetch_spot_prices", return_value=[])
+        result = runner.invoke(
+            app,
+            ["--arch", "graviton", "--regions", "us-east-1", "--no-cache"],
+        )
+        assert result.exit_code == 0, result.stdout
+        assert mock_resolve.call_args.kwargs["architectures"] == ["arm64"]
+
+    def test_arch_repeated_flags_build_list(self, mocker):
+        """Multiple --arch occurrences produce a multi-value filter list."""
+        mock_resolve = mocker.patch(
+            "ec2_spot_query.core.resolve_instance_types", return_value=["t3.micro"]
+        )
+        mocker.patch("ec2_spot_query.core.fetch_spot_prices", return_value=[])
+        result = runner.invoke(
+            app,
+            ["--arch", "x86", "--architecture", "arm", "--regions", "us-east-1", "--no-cache"],
+        )
+        assert result.exit_code == 0, result.stdout
+        assert mock_resolve.call_args.kwargs["architectures"] == ["x86_64", "arm64"]
+
+    def test_no_arch_passes_none(self, mocker):
+        """Without --arch, resolve_instance_types receives architectures=None."""
+        mock_resolve = mocker.patch(
+            "ec2_spot_query.core.resolve_instance_types", return_value=["t3.micro"]
+        )
+        mocker.patch("ec2_spot_query.core.fetch_spot_prices", return_value=[])
+        result = runner.invoke(
+            app, ["--regions", "us-east-1", "--no-cache"]
+        )
+        assert result.exit_code == 0, result.stdout
+        assert mock_resolve.call_args.kwargs["architectures"] is None
+
+    def test_arch_ignored_with_explicit_instance_types(self, mocker):
+        """Explicit --instance-types short-circuits resolution; no API filter needed."""
+        mock_resolve = mocker.patch(
+            "ec2_spot_query.core.resolve_instance_types", return_value=["t3.micro"]
+        )
+        mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+        result = runner.invoke(
+            app,
+            [
+                "--instance-types", "t3.micro", "--arch", "arm",
+                "--regions", "us-east-1", "--no-cache",
+            ],
+        )
+        assert result.exit_code == 0, result.stdout
+        mock_resolve.assert_not_called()
+
+    def test_unknown_arch_exits_nonzero(self, mocker):
+        """Unknown architecture aliases fail fast with a clear error."""
+        mock_resolve = mocker.patch(
+            "ec2_spot_query.core.resolve_instance_types", return_value=["t3.micro"]
+        )
+        result = runner.invoke(
+            app,
+            ["--arch", "sparc", "--regions", "us-east-1", "--no-cache"],
+        )
+        assert result.exit_code == 1
+        combined = result.stdout + (result.stderr if result.stderr_bytes else "")
+        assert "Unknown architecture" in combined
+        mock_resolve.assert_not_called()
+
+    def test_arch_cache_key_is_arch_specific(self, mocker, tmp_path):
+        """Resolve cache keys embed the mapped arch so filters never share entries."""
+        cache_file = tmp_path / ".cache" / "ec2-spot-cache.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps({
+            "resolve:vcpu0-64:ram0.5-128.0:gpu0-8:storage0.0-256.0:archarm64": {
+                "data": ["c6g.large"],
+                "expires_at": 9999999999,
+            }
+        }), encoding="utf-8")
+        mock_resolve = mocker.patch(
+            "ec2_spot_query.core.resolve_instance_types", return_value=["c6g.large"]
+        )
+        mocker.patch("ec2_spot_query.core.fetch_spot_prices", return_value=[])
+
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            result = runner.invoke(
+                app, ["--arch", "arm", "--regions", "us-east-1"]
+            )
+        assert result.exit_code == 0, result.stdout
+        mock_resolve.assert_not_called()  # served from the arch-specific cache entry
+
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            result = runner.invoke(app, ["--regions", "us-east-1"])
+        assert result.exit_code == 0, result.stdout
+        mock_resolve.assert_called_once()  # no-arch key differs, so it must resolve
+
+
 class TestFlags:
     """Test --progress and --debug flags."""
 

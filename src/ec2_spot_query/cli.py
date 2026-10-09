@@ -163,6 +163,7 @@ def main(
     progress: bool = typer.Option(False, "--progress", "-p", help="Show progress with rich spinner"),
     product_description: str = typer.Option("Linux/UNIX", "--product-description", help="Product description filter for spot price queries (e.g. Linux/UNIX, Windows, SUSE Linux)"),
     debug: bool = typer.Option(False, "--debug", help="Show detailed EC2 API request/response logs"),
+    arch: list[str] | None = typer.Option(None, "--arch", "--architecture", help="Filter by processor architecture. Aliases: x86, arm, graviton, mac. Official values: x86_64, arm64, riscv64, x86_64_mac, arm64_mac. Repeat the flag for multiple architectures."),
 ) -> None:
     """Analyse and rank AWS EC2 Spot instance prices."""
     if ctx.invoked_subcommand is not None:
@@ -189,16 +190,24 @@ def main(
         _log("init", "EC2 Spot Query")
         _log("info", "Validating AWS credentials...")
 
+        # Map architecture aliases to official values (fails fast on unknown values)
+        mapped_archs = core.map_architectures(arch)
+
         # Resolve instance types (with cache)
         ipts = instance_types or []
         if ipts:
             _log("query", f"Using {len(ipts)} specified instance types")
+            if mapped_archs:
+                _log("info", "Note: --arch is ignored when explicit --instance-types are given")
         else:
+            arch_desc = ",".join(mapped_archs) if mapped_archs else "any"
             _log(
                 "query",
-                f"Resolving instances (vcpu[{min_vcpu}-{max_vcpu}], ram[{min_ram}-{max_ram}] GB, gpu[{min_gpu}-{max_gpu}], storage[{min_instance_storage}-{max_instance_storage}] GB)",
+                f"Resolving instances (arch[{arch_desc}], vcpu[{min_vcpu}-{max_vcpu}], ram[{min_ram}-{max_ram}] GB, gpu[{min_gpu}-{max_gpu}], storage[{min_instance_storage}-{max_instance_storage}] GB)",
             )
             resolve_cache_key = f"resolve:vcpu{min_vcpu}-{max_vcpu}:ram{min_ram}-{max_ram}:gpu{min_gpu}-{max_gpu}:storage{min_instance_storage}-{max_instance_storage}"
+            if mapped_archs:
+                resolve_cache_key += f":arch{','.join(mapped_archs)}"
             ipts = None
             if not no_cache:
                 ipts = cache.load_cache(resolve_cache_key, ttl_seconds=cache.INSTANCE_TTL_SECONDS)
@@ -215,6 +224,7 @@ def main(
                     max_gpu=max_gpu,
                     min_instance_storage_gb=min_instance_storage,
                     max_instance_storage_gb=max_instance_storage,
+                    architectures=mapped_archs,
                 )
                 if not no_cache:
                     cache.save_cache(resolve_cache_key, ipts, ttl_seconds=cache.INSTANCE_TTL_SECONDS)

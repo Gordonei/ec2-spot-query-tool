@@ -646,6 +646,155 @@ def test_progress_callback_records_offset(mock_ec2):
     assert totals[-1] == 103, "offset (100) + fetched (3)"
 
 
+# ---------------------------------------------------------------------------
+# Architecture filter tests
+# ---------------------------------------------------------------------------
+
+def test_map_architectures_none():
+    """None input means no architecture filter."""
+    assert core.map_architectures(None) is None
+
+
+def test_map_architectures_empty_input():
+    """Empty list / empty string input means no architecture filter."""
+    assert core.map_architectures([]) is None
+    assert core.map_architectures("") is None
+    assert core.map_architectures(["  ", ""]) is None
+
+
+def test_map_architectures_x86_aliases():
+    """All x86-family aliases map to x86_64."""
+    for alias in ("x86", "x86_64", "intel", "amd"):
+        assert core.map_architectures(alias) == ["x86_64"]
+
+
+def test_map_architectures_arm_aliases():
+    """All arm-family aliases map to arm64."""
+    for alias in ("arm", "arm64", "graviton", "aarch64"):
+        assert core.map_architectures(alias) == ["arm64"]
+
+
+def test_map_architectures_mac_expands():
+    """mac expands to both mac architecture values."""
+    assert core.map_architectures("mac") == ["arm64_mac", "x86_64_mac"]
+
+
+def test_map_architectures_case_insensitive():
+    """Input tokens are matched case-insensitively."""
+    assert core.map_architectures("ARM") == ["arm64"]
+    assert core.map_architectures("Graviton") == ["arm64"]
+    assert core.map_architectures(["X86", "ARM"]) == ["x86_64", "arm64"]
+
+
+def test_map_architectures_official_passthrough():
+    """Official AWS values pass through unchanged."""
+    assert core.map_architectures("riscv64") == ["riscv64"]
+    assert core.map_architectures("x86_64_mac") == ["x86_64_mac"]
+    assert core.map_architectures("arm64_mac") == ["arm64_mac"]
+
+
+def test_map_architectures_deduplicates():
+    """Equivalent aliases collapse to one value, preserving first-seen order."""
+    assert core.map_architectures(["arm", "graviton", "aarch64"]) == ["arm64"]
+    assert core.map_architectures(["x86", "arm", "intel"]) == ["x86_64", "arm64"]
+
+
+def test_map_architectures_strips_whitespace():
+    """Surrounding whitespace on tokens is ignored."""
+    assert core.map_architectures(["  arm  "]) == ["arm64"]
+
+
+def test_map_architectures_unknown_raises():
+    """Unknown tokens raise ValueError."""
+    with pytest.raises(ValueError, match="Unknown architecture"):
+        core.map_architectures("sparc")
+    with pytest.raises(ValueError, match="Unknown architecture"):
+        core.map_architectures(["arm", "bogus"])
+
+
+def test_resolve_arch_filter_passed_to_api():
+    """architectures are passed as a processor-info.supported-architecture filter."""
+    mock_client = MagicMock()
+    mock_client.describe_instance_types.return_value = {
+        "InstanceTypes": [
+            {"InstanceType": "t3.micro", "VCpuInfo": {"DefaultVCpus": 2}, "MemoryInfo": {"SizeInMiB": 1024}},
+        ]
+    }
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        result = core.resolve_instance_types(
+            instance_types=[], min_vcpu=0, min_ram_gb=0.5, min_gpu=0,
+            max_vcpu=64, max_ram_gb=128, max_gpu=8,
+            min_instance_storage_gb=0, max_instance_storage_gb=256,
+            architectures=["arm64"],
+        )
+    _, kwargs = mock_client.describe_instance_types.call_args
+    assert kwargs["Filters"] == [
+        {"Name": "processor-info.supported-architecture", "Values": ["arm64"]},
+    ]
+    assert result == ["t3.micro"]
+
+
+def test_resolve_arch_multiple_values_passed():
+    """Multiple architecture values are all passed in the filter."""
+    mock_client = MagicMock()
+    mock_client.describe_instance_types.return_value = {"InstanceTypes": []}
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        core.resolve_instance_types(
+            instance_types=[], min_vcpu=0, min_ram_gb=0.5, min_gpu=0,
+            max_vcpu=64, max_ram_gb=128, max_gpu=8,
+            min_instance_storage_gb=0, max_instance_storage_gb=256,
+            architectures=["arm64_mac", "x86_64_mac"],
+        )
+    _, kwargs = mock_client.describe_instance_types.call_args
+    assert kwargs["Filters"] == [
+        {"Name": "processor-info.supported-architecture", "Values": ["arm64_mac", "x86_64_mac"]},
+    ]
+
+
+def test_resolve_no_architectures_omits_filters():
+    """Without architectures the describe call carries no Filters (unchanged behavior)."""
+    mock_client = MagicMock()
+    mock_client.describe_instance_types.return_value = {"InstanceTypes": []}
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        core.resolve_instance_types(
+            instance_types=[], min_vcpu=0, min_ram_gb=0.5, min_gpu=0,
+            max_vcpu=64, max_ram_gb=128, max_gpu=8,
+            min_instance_storage_gb=0, max_instance_storage_gb=256,
+        )
+    _, kwargs = mock_client.describe_instance_types.call_args
+    assert "Filters" not in kwargs
+
+
+def test_resolve_architectures_ignored_when_types_provided():
+    """Explicit instance types short-circuit; the API filter is never applied."""
+    mock_client = MagicMock()
+    mock_client.describe_instance_types.return_value = {"InstanceTypes": []}
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        result = core.resolve_instance_types(
+            instance_types=["t3.micro"], min_vcpu=0, min_ram_gb=0.5, min_gpu=0,
+            max_vcpu=64, max_ram_gb=128, max_gpu=8,
+            min_instance_storage_gb=0, max_instance_storage_gb=256,
+            architectures=["arm64"],
+        )
+    assert result == ["t3.micro"]
+    mock_client.describe_instance_types.assert_not_called()
+
+
+def test_resolve_invalid_architecture_raises():
+    """Non-official architecture values raise ValueError."""
+    mock_client = MagicMock()
+    mock_client.describe_instance_types.return_value = {"InstanceTypes": []}
+    with patch("ec2_spot_query.core._DEFAULT_CLIENT", mock_client):
+        with pytest.raises(ValueError, match="Unsupported architecture"):
+            core.resolve_instance_types(
+                instance_types=[], min_vcpu=0, min_ram_gb=0.5, min_gpu=0,
+                max_vcpu=64, max_ram_gb=128, max_gpu=8,
+                min_instance_storage_gb=0, max_instance_storage_gb=256,
+                architectures=["sparc"],
+            )
+    mock_client.describe_instance_types.assert_not_called()
+
+
 def test_no_progress_unchanged_behavior(mock_ec2):
     """Existing tests pass unmodified — default progress_callback=None is invisible."""
     mock_ec2.describe_spot_price_history.return_value = {
