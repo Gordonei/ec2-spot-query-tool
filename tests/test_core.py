@@ -604,6 +604,48 @@ def test_progress_includes_all_pairs(mock_ec2):
     assert any("t3.large" in p and "us-west-2" in p for p in pairs_seen)
 
 
+def test_progress_callback_records_offset(mock_ec2):
+    """records_offset seeds the running total so cached records are counted."""
+    mock_ec2.describe_spot_price_history.side_effect = [
+        {
+            "SpotPriceHistory": [
+                _make_spot_record("t3.micro", "us-east-1a", 0.010),
+                _make_spot_record("t3.micro", "us-east-1a", 0.011),
+            ]
+        },
+        {
+            "SpotPriceHistory": [
+                _make_spot_record("t3.micro", "us-east-1b", 0.012),
+            ]
+        },
+    ]
+    mock_ec2.describe_regions.return_value = {
+        "Regions": [
+            {"RegionName": "us-east-1"},
+            {"RegionName": "us-east-2"},
+        ]
+    }
+
+    received: list[tuple[str, int]] = []
+    callback = lambda pair, total: received.append((pair, total))
+
+    result = core.fetch_spot_prices(
+        ["t3.micro"],
+        regions=["us-east-1", "us-east-2"],
+        days=30,
+        progress_callback=callback,
+        product_description="Linux/UNIX",
+        records_offset=100,
+    )
+
+    assert len(result) == 3
+    assert len(received) == 2
+    totals = [t for _, t in received]
+    assert all(t >= 100 for t in totals)
+    assert totals == sorted(totals), "running total must be monotonic"
+    assert totals[-1] == 103, "offset (100) + fetched (3)"
+
+
 def test_no_progress_unchanged_behavior(mock_ec2):
     """Existing tests pass unmodified — default progress_callback=None is invisible."""
     mock_ec2.describe_spot_price_history.return_value = {

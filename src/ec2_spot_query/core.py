@@ -212,6 +212,7 @@ def fetch_spot_prices(
     days: int,
     product_description: str,
     progress_callback: Callable[[str, int], None] | None = None,
+    records_offset: int = 0,
 ) -> list[dict[str, Any]]:
     """Fetch spot price history concurrently across (instance_type, region) pairs.
 
@@ -223,6 +224,10 @@ def fetch_spot_prices(
         product_description: Product description filter for spot price queries.
         progress_callback: Optional callable pair(name, total_records) -> None.
             Called after each (instance_type, region) fetch completes.
+        records_offset: Number of records already accounted for before this
+            call (e.g. records served from the cache). The reported
+            ``total_records`` in each callback is seeded from this value so
+            callers can maintain a single running total across fetches.
     """
     now = dt.datetime.now(dt.timezone.utc)
     start = now - dt.timedelta(days=days)
@@ -244,7 +249,7 @@ def fetch_spot_prices(
                 )
                 futures[fut] = (reg, batch_idx, batch)
 
-        total_so_far = 0
+        total_so_far = records_offset
         for future in as_completed(futures):
             reg, batch_idx, batch_types = futures[future]
             batch_records = future.result()

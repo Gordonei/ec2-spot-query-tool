@@ -8,7 +8,7 @@ import json
 from typer.testing import CliRunner
 
 from ec2_spot_query.cli import app
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 runner = CliRunner()
 
@@ -162,3 +162,110 @@ class TestFlags:
             ["--instance-types", "t3.micro", "--regions", "us-east-1", "--debug", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
+
+
+class TestPairLogging:
+    """Test the region listing and the 'instances across regions = pairs' line."""
+
+    def test_lists_regions_and_pairs_line(self, mocker):
+        """CLI lists the regions and logs the 'X instances across Y regions = Z pairs' line."""
+        mock_log = MagicMock()
+        mocker.patch("ec2_spot_query.cli._make_progress_handler", return_value=mock_log)
+        mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+        result = runner.invoke(
+            app,
+            [
+                "--instance-types", "t3.micro",
+                "--regions", "us-east-1", "--regions", "eu-west-1",
+                "--no-cache", "--progress",
+            ],
+        )
+        assert result.exit_code == 0, result.stdout
+        messages = [c.args[1] for c in mock_log.call_args_list if len(c.args) >= 2]
+        assert any(
+            "2 regions" in m and "us-east-1" in m and "eu-west-1" in m
+            for m in messages
+        ), f"no region listing line in {messages}"
+        assert any(
+            "1 instances across 2 regions = 2 pairs" in m for m in messages
+        ), f"no pairs line in {messages}"
+
+
+class TestRunningTotal:
+    """Progress-bar records field is a global running total that includes cached records."""
+
+    def test_records_running_total_includes_cached(self, mocker, tmp_path):
+        """Cached records seed the fetch offset and the bar's running total."""
+        cache_file = tmp_path / ".cache" / "ec2-spot-cache.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        # t3.micro is cached (3 records); t3.large is a cache miss (fetched, 2 records)
+        cache_file.write_text(json.dumps({
+            "spot:t3.micro:us-east-1": {
+                "data": [
+                    {
+                        "Region": "us-east-1",
+                        "InstanceId": "us-east-1:us-east-1a",
+                        "AvailabilityZone": "us-east-1a",
+                        "InstanceType": "t3.micro",
+                        "SpotPrice": "0.012",
+                        "Timestamp": "2025-10-01T00:00:00+00:00",
+                    }
+                    for _ in range(3)
+                ],
+                "expires_at": 9999999999,
+            }
+        }), encoding="utf-8")
+
+        def fake_fetch(itypes, regions=None, days=30, product_description=None,
+                       progress_callback=None, records_offset=0):
+            recs = [{
+                "Region": "us-east-1",
+                "InstanceId": "us-east-1:us-east-1b",
+                "AvailabilityZone": "us-east-1b",
+                "InstanceType": itypes[0],
+                "SpotPrice": "0.048",
+                "Timestamp": dt.datetime(2025, 10, 1, 0, 0, tzinfo=dt.timezone.utc),
+            } for _ in range(2)]
+            if progress_callback is not None:
+                progress_callback(
+                    f"Fetching {itypes[0]} in us-east-1", records_offset + len(recs)
+                )
+            return recs
+
+        mock_fetch = mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", side_effect=fake_fetch
+        )
+
+        mock_progress = MagicMock()
+        mock_progress.__enter__.return_value = mock_progress
+        mock_progress.add_task.return_value = MagicMock(name="task")
+        mocker.patch("ec2_spot_query.cli.Progress", return_value=mock_progress)
+        mocker.patch(
+            "ec2_spot_query.cli._make_progress_handler", return_value=MagicMock()
+        )
+
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            result = runner.invoke(
+                app,
+                [
+                    "--instance-types", "t3.micro", "--instance-types", "t3.large",
+                    "--regions", "us-east-1",
+                    "--progress",
+                ],
+            )
+
+        assert result.exit_code == 0, result.stdout
+        # The fetch must be offset by the 3 cached records.
+        assert mock_fetch.call_count == 1
+        assert mock_fetch.call_args.kwargs["records_offset"] == 3
+
+        records_values = [
+            c.kwargs["records"]
+            for c in mock_progress.update.call_args_list
+            if "records" in c.kwargs
+        ]
+        assert records_values, "expected the progress task to track a running total"
+        assert records_values == sorted(records_values), "running total must be monotonic"
+        assert records_values[-1] == 5, "final = 3 cached + 2 fetched"

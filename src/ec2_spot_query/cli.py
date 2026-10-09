@@ -240,11 +240,13 @@ def main(
         regions_list = sorted(regions_to_use)
         total_pairs = len(ipts) * len(regions_list)
 
+        _log("complete", f"Found {len(regions_list)} regions: {', '.join(regions_list)}", {"regions": regions_list})
+
         if total_pairs == 0:
             _log("warn", "No instance×region pairs to query (0 types × 0 regions)")
             _log("complete", "Nothing to fetch")
         else:
-            _log("info", f"Querying {total_pairs} instance×region pairs ({len(ipts)} types × {len(regions_list)} regions)")
+            _log("query", f"{len(ipts)} instances across {len(regions_list)} regions = {total_pairs} pairs")
 
         # Fetch spot prices (per-instance-type cache)
         raw: list[dict] = []
@@ -290,6 +292,7 @@ def main(
                             task,
                             advance=len(regions_list),
                             done=done["count"],
+                            records=len(raw),
                             refresh=True,
                         )
                         _log("info", f"Using cached spot prices for {itype} ({len(cached):,} records)", {"records": len(cached)})
@@ -300,6 +303,7 @@ def main(
                         days=30,
                         progress_callback=_wrap_progress_callback,
                         product_description=product_description,
+                        records_offset=len(raw),
                     )
                     if not no_cache:
                         cache.save_cache(spot_cache_key, batch, ttl_seconds=cache.SPOT_TTL_SECONDS)
