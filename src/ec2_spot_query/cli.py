@@ -144,7 +144,7 @@ def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int =
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    instance_types: list[str] = typer.Option(None, "--instance-types", "-i", help="Instance types to query"),
+    instance_types: list[str] = typer.Option(None, "--instance-types", "-i", help="Instance types to query. Supports glob patterns (*, ?, [seq]), e.g. 'inf2.*'"),
     min_vcpu: int = typer.Option(0, "--min-vcpu", help="Minimum vCPUs"),
     min_ram: float = typer.Option(0.5, "--min-ram", help="Minimum RAM in GB"),
     min_gpu: int = typer.Option(0, "--min-gpu", help="Minimum GPU count"),
@@ -153,7 +153,7 @@ def main(
     max_gpu: int = typer.Option(8, "--max-gpu", help="Maximum GPU count"),
     min_instance_storage: float = typer.Option(0, "--min-instance-storage", help="Minimum instance storage in GB"),
     max_instance_storage: float = typer.Option(256, "--max-instance-storage", help="Maximum instance storage in GB"),
-    regions: list[str] = typer.Option(None, "--regions", "-r", help="Regions to query"),
+    regions: list[str] = typer.Option(None, "--regions", "-r", help="Regions to query. Supports glob patterns (*, ?, [seq]), e.g. 'eu-*'"),
     all_regions: bool = typer.Option(False, "--all-regions", help="Query all regions"),
     sort_by: str = typer.Option("1d_mean", "--sort-by", help="Sort metric (1h_mean, 6h_mean, 12h_mean, 1d_mean, 1w_mean, 1m_mean)"),
     limit: int = typer.Option(10, "--limit", help="Number of rows to display (-1 for all)"),
@@ -196,6 +196,24 @@ def main(
         # Resolve instance types (with cache)
         ipts = instance_types or []
         if ipts:
+            if any(core.has_glob(p) for p in ipts):
+                all_types: list[str] | None = None
+                if not no_cache:
+                    all_types = cache.load_cache("all_instance_types", ttl_seconds=cache.INSTANCE_TTL_SECONDS)
+                    if all_types:
+                        _log("info", f"Using cached instance type catalog ({len(all_types)} types)", {"types": all_types})
+                if all_types is None or no_cache_lookup:
+                    all_types = core.list_instance_types()
+                    if not all_types:
+                        raise typer.Exit(code=1)
+                    if not no_cache:
+                        cache.save_cache("all_instance_types", all_types, ttl_seconds=cache.INSTANCE_TTL_SECONDS)
+                    _log("info", f"Found {len(all_types)} instance types")
+                for p in ipts:
+                    if core.has_glob(p) and not core.match_names(all_types, p):
+                        _log("warn", f"No instance types match pattern '{p}'")
+                ipts = core.expand_names(all_types, ipts)
+                _log("complete", f"Expanded instance type patterns to {len(ipts)} types: {', '.join(ipts)}")
             _log("query", f"Using {len(ipts)} specified instance types")
             if mapped_archs:
                 _log("info", "Note: --arch is ignored when explicit --instance-types are given")
@@ -230,8 +248,9 @@ def main(
                     cache.save_cache(resolve_cache_key, ipts, ttl_seconds=cache.INSTANCE_TTL_SECONDS)
             _log("complete", f"Found {len(ipts)} types: {', '.join(ipts)}", {"types": ipts})
 
-        # Resolve regions (discover from AWS if --all-regions, cached)
-        regions_to_use = None if all_regions else regions
+        # Resolve regions (discover from AWS if --all-regions or glob patterns, cached)
+        regions_need_expansion = bool(regions) and any(core.has_glob(p) for p in regions)
+        regions_to_use = None if (all_regions or regions_need_expansion) else regions
         if not regions_to_use:
             _log("query", "Fetching region list from AWS")
             regions_cache_key = "regions"
@@ -246,11 +265,18 @@ def main(
                 if not no_cache:
                     cache.save_cache(regions_cache_key, regions_to_use, ttl_seconds=cache.REGIONS_TTL_SECONDS)
                 _log("info", f"Found {len(regions_to_use)} regions")
+            if regions_need_expansion:
+                for p in regions:
+                    if core.has_glob(p) and not core.match_names(regions_to_use, p):
+                        _log("warn", f"No regions match pattern '{p}'")
+                regions_to_use = core.expand_names(regions_to_use, regions)
+                _log("complete", f"Expanded region patterns to {len(regions_to_use)} regions: {', '.join(regions_to_use)}")
 
         regions_list = sorted(regions_to_use)
         total_pairs = len(ipts) * len(regions_list)
 
-        _log("complete", f"Found {len(regions_list)} regions: {', '.join(regions_list)}", {"regions": regions_list})
+        if not regions_need_expansion:
+            _log("complete", f"Found {len(regions_list)} regions: {', '.join(regions_list)}", {"regions": regions_list})
 
         if total_pairs == 0:
             _log("warn", "No instance×region pairs to query (0 types × 0 regions)")

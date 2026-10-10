@@ -228,6 +228,193 @@ class TestArchFilter:
         mock_resolve.assert_called_once()  # no-arch key differs, so it must resolve
 
 
+class TestGlobExpansion:
+    """Test glob pattern support in --regions and --instance-types."""
+
+    def test_region_glob_expands(self, mocker):
+        """-r 'eu-*' expands against the discovered region list."""
+        mocker.patch(
+            "ec2_spot_query.core.list_regions",
+            return_value=["us-east-1", "eu-west-1", "eu-central-1", "ap-southeast-2"],
+        )
+        mock_fetch = mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+        result = runner.invoke(
+            app,
+            ["--instance-types", "t3.micro", "--regions", "eu-*", "--no-cache"],
+        )
+        assert result.exit_code == 0, result.stdout
+        assert mock_fetch.call_args.kwargs["regions"] == ["eu-central-1", "eu-west-1"]
+
+    def test_region_literal_fast_path_skips_list_regions(self, mocker):
+        """Literal-only --regions never calls list_regions (fast path preserved)."""
+        mock_list = mocker.patch("ec2_spot_query.core.list_regions")
+        mock_fetch = mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+        result = runner.invoke(
+            app,
+            ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"],
+        )
+        assert result.exit_code == 0, result.stdout
+        mock_list.assert_not_called()
+        assert mock_fetch.call_args.kwargs["regions"] == ["us-east-1"]
+
+    def test_instance_glob_expands(self, mocker):
+        """-i 'inf2.*' expands against the full instance type catalog."""
+        mocker.patch(
+            "ec2_spot_query.core.list_instance_types",
+            return_value=["t3.micro", "inf2.xlarge", "inf2.2xlarge"],
+        )
+        mock_fetch = mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+        result = runner.invoke(
+            app,
+            ["--instance-types", "inf2.*", "--regions", "us-east-1", "--no-cache"],
+        )
+        assert result.exit_code == 0, result.stdout
+        fetched = [c.args[0] for c in mock_fetch.call_args_list]
+        assert fetched == [["inf2.2xlarge"], ["inf2.xlarge"]]
+
+    def test_mixed_literals_and_globs(self, mocker):
+        """-i 't3.micro' -i 'inf2.*' keeps literals and expands globs."""
+        mocker.patch(
+            "ec2_spot_query.core.list_instance_types",
+            return_value=["t3.micro", "inf2.xlarge", "c7g.large"],
+        )
+        mock_fetch = mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+        result = runner.invoke(
+            app,
+            [
+                "--instance-types", "t3.micro", "--instance-types", "inf2.*",
+                "--regions", "us-east-1", "--no-cache",
+            ],
+        )
+        assert result.exit_code == 0, result.stdout
+        fetched = [c.args[0] for c in mock_fetch.call_args_list]
+        assert fetched == [["inf2.xlarge"], ["t3.micro"]]
+
+    def test_region_glob_zero_match_warns_and_continues(self, mocker):
+        """A region pattern matching nothing warns and exits cleanly without fetching."""
+        mocker.patch(
+            "ec2_spot_query.core.list_regions",
+            return_value=["us-east-1", "eu-west-1"],
+        )
+        mock_fetch = mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+        result = runner.invoke(
+            app,
+            ["--instance-types", "t3.micro", "--regions", "zzz-*", "--no-cache"],
+        )
+        assert result.exit_code == 0, result.stdout
+        mock_fetch.assert_not_called()
+        combined = result.stdout + (result.stderr if result.stderr_bytes else "")
+        assert "zzz-*" in combined
+
+    def test_instance_glob_zero_match_warns_and_continues(self, mocker):
+        """An instance pattern matching nothing warns and exits cleanly without fetching."""
+        mocker.patch(
+            "ec2_spot_query.core.list_instance_types",
+            return_value=["t3.micro", "c7g.large"],
+        )
+        mock_fetch = mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+        result = runner.invoke(
+            app,
+            ["--instance-types", "zzz.*", "--regions", "us-east-1", "--no-cache"],
+        )
+        assert result.exit_code == 0, result.stdout
+        mock_fetch.assert_not_called()
+        combined = result.stdout + (result.stderr if result.stderr_bytes else "")
+        assert "zzz.*" in combined
+
+    def test_region_glob_uses_cached_region_list(self, mocker, tmp_path):
+        """A cached region list serves glob expansion without calling list_regions."""
+        cache_file = tmp_path / ".cache" / "ec2-spot-cache.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps({
+            "regions": {
+                "data": ["us-east-1", "eu-west-1", "eu-central-1"],
+                "expires_at": 9999999999,
+            }
+        }), encoding="utf-8")
+        mock_list = mocker.patch("ec2_spot_query.core.list_regions")
+        mock_fetch = mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            result = runner.invoke(
+                app,
+                ["--instance-types", "t3.micro", "--regions", "eu-*"],
+            )
+
+        assert result.exit_code == 0, result.stdout
+        mock_list.assert_not_called()
+        assert mock_fetch.call_args.kwargs["regions"] == ["eu-central-1", "eu-west-1"]
+
+    def test_instance_glob_uses_cached_catalog(self, mocker, tmp_path):
+        """A cached instance type catalog serves expansion without list_instance_types."""
+        cache_file = tmp_path / ".cache" / "ec2-spot-cache.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps({
+            "all_instance_types": {
+                "data": ["t3.micro", "inf2.xlarge", "inf2.2xlarge"],
+                "expires_at": 9999999999,
+            }
+        }), encoding="utf-8")
+        mock_types = mocker.patch("ec2_spot_query.core.list_instance_types")
+        mock_fetch = mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            result = runner.invoke(
+                app,
+                ["--instance-types", "inf2.*", "--regions", "us-east-1"],
+            )
+
+        assert result.exit_code == 0, result.stdout
+        mock_types.assert_not_called()
+        fetched = [c.args[0] for c in mock_fetch.call_args_list]
+        assert fetched == [["inf2.2xlarge"], ["inf2.xlarge"]]
+
+    def test_instance_glob_saves_catalog_to_cache(self, mocker, tmp_path):
+        """A catalog miss saves the fetched type list under the cache key."""
+        cache_file = tmp_path / ".cache" / "ec2-spot-cache.json"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text("{}", encoding="utf-8")
+        mocker.patch(
+            "ec2_spot_query.core.list_instance_types",
+            return_value=["t3.micro", "inf2.xlarge"],
+        )
+        mocker.patch(
+            "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
+        )
+
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            result = runner.invoke(
+                app,
+                ["--instance-types", "inf2.*", "--regions", "us-east-1"],
+            )
+
+        assert result.exit_code == 0, result.stdout
+        saved = json.loads(cache_file.read_text(encoding="utf-8"))
+        assert saved["all_instance_types"]["data"] == ["t3.micro", "inf2.xlarge"]
+
+    def test_help_mentions_glob_patterns(self):
+        """--help documents glob support for --regions and --instance-types."""
+        result = runner.invoke(app, ["--help"])
+        assert result.exit_code == 0
+        assert "glob" in result.stdout.lower()
+
+
 class TestFlags:
     """Test --progress and --debug flags."""
 
