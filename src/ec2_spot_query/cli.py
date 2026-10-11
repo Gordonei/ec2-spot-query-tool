@@ -186,6 +186,17 @@ def main(
     console = Console()
     _log = _make_progress_handler(console, progress)
 
+    # Counter for skipped regions (logged as "Skipping ..." by core.logger)
+    _skip_count: dict[str, int] = {"count": 0}
+
+    class _SkipCountHandler(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.WARNING and "Skipping" in record.getMessage():
+                _skip_count["count"] += 1
+
+    _skip_handler = _SkipCountHandler()
+    core.logger.addHandler(_skip_handler)
+
     try:
         _log("init", "EC2 Spot Query")
         _log("info", "Validating AWS credentials...")
@@ -347,6 +358,9 @@ def main(
 
             elapsed = time.time() - t0
             _log("complete", f"Fetched {len(raw):,} records in {elapsed:.1f}s", {"records": len(raw)})
+
+            if not raw and _skip_count["count"] > 0:
+                _log("error", f"All {_skip_count['count']} region queries failed — check logs for details")
 
         # Compute metrics
         _log("query", f"Computing metrics for {len(raw):,} price points across 6 time windows")

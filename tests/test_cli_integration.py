@@ -557,3 +557,47 @@ class TestRunningTotal:
         assert records_values, "expected the progress task to track a running total"
         assert records_values == sorted(records_values), "running total must be monotonic"
         assert records_values[-1] == 5, "final = 3 cached + 2 fetched"
+
+
+class TestErrorHandling:
+    """Test graceful handling of region-level errors."""
+
+    def test_all_regions_failed_shows_error_message(self, mocker):
+        """When all regions fail with errors, the CLI shows an explicit message."""
+        import logging
+
+        mock_resolve = mocker.patch(
+            "ec2_spot_query.core.resolve_instance_types", return_value=["t3.micro"]
+        )
+        mocker.patch("ec2_spot_query.core.list_regions", return_value=["us-east-1", "eu-west-1"])
+
+        # Import the core logger and handler class from the CLI
+        from ec2_spot_query import core
+
+        # Create a handler that will count warnings
+        skip_counts = {"count": 0}
+
+        class _SkipCountHandler(logging.Handler):
+            def emit(self, record):
+                if record.levelno >= logging.WARNING and "Skipping" in record.getMessage():
+                    skip_counts["count"] += 1
+
+        handler = _SkipCountHandler()
+        core.logger.addHandler(handler)
+        try:
+            # Mock _fetch_region_prices to log warnings (simulating AuthFailure)
+            def _failing_fetch(*args, **kwargs):
+                core.logger.warning(
+                    "Skipping %s: AuthFailure - test error (region may not support spot pricing)",
+                    args[0],
+                )
+                return []
+
+            mocker.patch("ec2_spot_query.core._fetch_region_prices", side_effect=_failing_fetch)
+
+            result = runner.invoke(app, ["--no-cache", "--regions", "us-east-1", "--regions", "eu-west-1"])
+            assert result.exit_code == 0, result.stdout
+            assert "All" in result.output and "region" in result.output and "failed" in result.output
+            assert skip_counts["count"] == 2
+        finally:
+            core.logger.removeHandler(handler)

@@ -471,8 +471,8 @@ def test_fetch_region_prices_consumes_multiple_pages(mock_ec2):
     assert mock_ec2.describe_spot_price_history.call_count == 2
 
 
-def test_fetch_region_prices_auth_failure_returns_empty(mock_ec2):
-    """AuthFailure returns empty list and logs a warning instead of crashing."""
+def test_fetch_region_prices_api_error_returns_empty(mock_ec2):
+    """API errors (ClientError) return empty list and log a warning instead of crashing."""
     from botocore.exceptions import ClientError
 
     mock_ec2.describe_spot_price_history.side_effect = ClientError(
@@ -490,26 +490,56 @@ def test_fetch_region_prices_auth_failure_returns_empty(mock_ec2):
     assert result == []
     mock_logger.warning.assert_called_once()
     args, _ = mock_logger.warning.call_args
-    assert "AuthFailure" in args[0]
+    assert "Skipping" in args[0]
     assert args[1] == "ap-south-2"
 
 
-def test_fetch_region_prices_non_auth_failure_raises(mock_ec2):
-    """Non-AuthFailure ClientError exceptions still propagate."""
-    from botocore.exceptions import ClientError
+def test_fetch_region_prices_network_error_returns_empty(mock_ec2):
+    """Network errors (BotoCoreError) also return empty list and log a warning."""
+    from botocore.exceptions import EndpointConnectionError
 
-    mock_ec2.describe_spot_price_history.side_effect = ClientError(
-        error_response={"Error": {"Code": "UnauthorizedAccess", "Message": "You are not authorized"}},
-        operation_name="DescribeSpotPriceHistory",
+    mock_ec2.describe_spot_price_history.side_effect = EndpointConnectionError(
+        endpoint_url="https://ec2.ap-south-2.amazonaws.com",
+        error_response="Connection refused",
     )
-    with pytest.raises(ClientError):
-        core._fetch_region_prices(
-            "us-east-1",
+    with patch("ec2_spot_query.core.logger") as mock_logger:
+        result = core._fetch_region_prices(
+            "ap-south-2",
             ["t3.micro"],
             dt.datetime(2025, 10, 1, tzinfo=dt.timezone.utc),
             dt.datetime(2025, 10, 2, tzinfo=dt.timezone.utc),
             "Linux/UNIX",
         )
+    assert result == []
+    mock_logger.warning.assert_called_once()
+    args, _ = mock_logger.warning.call_args
+    assert "Skipping" in args[0]
+    assert args[1] == "ap-south-2"
+
+
+def test_fetch_region_prices_api_error_logs_code_and_message(mock_ec2):
+    """ClientError warning includes the error code and message."""
+    from botocore.exceptions import ClientError
+
+    mock_ec2.describe_spot_price_history.side_effect = ClientError(
+        error_response={"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
+        operation_name="DescribeSpotPriceHistory",
+    )
+    with patch("ec2_spot_query.core.logger") as mock_logger:
+        result = core._fetch_region_prices(
+            "eu-west-1",
+            ["t3.micro"],
+            dt.datetime(2025, 10, 1, tzinfo=dt.timezone.utc),
+            dt.datetime(2025, 10, 2, tzinfo=dt.timezone.utc),
+            "Linux/UNIX",
+        )
+    assert result == []
+    mock_logger.warning.assert_called_once()
+    args, _ = mock_logger.warning.call_args
+    assert args[0] == "Skipping %s: %s - %s (region may not support spot pricing)"
+    assert args[1] == "eu-west-1"
+    assert args[2] == "ThrottlingException"
+    assert args[3] == "Rate exceeded"
 
 
 # ---------------------------------------------------------------------------

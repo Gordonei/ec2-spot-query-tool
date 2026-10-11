@@ -295,14 +295,20 @@ def _fetch_region_prices(
         t0 = time.perf_counter()
         try:
             resp = client.describe_spot_price_history(**spot_history_kwargs)
-        except botocore.exceptions.ClientError as e:
-            if e.response["Error"]["Code"] == "AuthFailure":
+        except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as e:
+            if isinstance(e, botocore.exceptions.ClientError):
+                code = e.response["Error"]["Code"]
+                message = e.response["Error"].get("Message", "")
                 logger.warning(
-                    "Skipping %s: AuthFailure (region may not support spot pricing)",
-                    region,
+                    "Skipping %s: %s - %s (region may not support spot pricing)",
+                    region, code, message,
                 )
-                return []
-            raise
+            else:
+                logger.warning(
+                    "Skipping %s: %s (region may be unreachable or not support spot pricing)",
+                    region, e,
+                )
+            return []
         page_records = 0
         for item in resp.get("SpotPriceHistory", []):
             ts = item.get("Timestamp")
