@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 import boto3
 import botocore.config
+import botocore.exceptions
 import pandas as pd
 
 # Adaptive retry config to handle RequestLimitExceeded / ThrottlingException
@@ -292,7 +293,16 @@ def _fetch_region_prices(
 
     while True:
         t0 = time.perf_counter()
-        resp = client.describe_spot_price_history(**spot_history_kwargs)
+        try:
+            resp = client.describe_spot_price_history(**spot_history_kwargs)
+        except botocore.exceptions.ClientError as e:
+            if e.response["Error"]["Code"] == "AuthFailure":
+                logger.warning(
+                    "Skipping %s: AuthFailure (region may not support spot pricing)",
+                    region,
+                )
+                return []
+            raise
         page_records = 0
         for item in resp.get("SpotPriceHistory", []):
             ts = item.get("Timestamp")

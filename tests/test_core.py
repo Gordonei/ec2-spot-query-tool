@@ -471,6 +471,47 @@ def test_fetch_region_prices_consumes_multiple_pages(mock_ec2):
     assert mock_ec2.describe_spot_price_history.call_count == 2
 
 
+def test_fetch_region_prices_auth_failure_returns_empty(mock_ec2):
+    """AuthFailure returns empty list and logs a warning instead of crashing."""
+    from botocore.exceptions import ClientError
+
+    mock_ec2.describe_spot_price_history.side_effect = ClientError(
+        error_response={"Error": {"Code": "AuthFailure", "Message": "AWS was not able to validate the provided access credentials"}},
+        operation_name="DescribeSpotPriceHistory",
+    )
+    with patch("ec2_spot_query.core.logger") as mock_logger:
+        result = core._fetch_region_prices(
+            "ap-south-2",
+            ["t3.micro"],
+            dt.datetime(2025, 10, 1, tzinfo=dt.timezone.utc),
+            dt.datetime(2025, 10, 2, tzinfo=dt.timezone.utc),
+            "Linux/UNIX",
+        )
+    assert result == []
+    mock_logger.warning.assert_called_once()
+    args, _ = mock_logger.warning.call_args
+    assert "AuthFailure" in args[0]
+    assert args[1] == "ap-south-2"
+
+
+def test_fetch_region_prices_non_auth_failure_raises(mock_ec2):
+    """Non-AuthFailure ClientError exceptions still propagate."""
+    from botocore.exceptions import ClientError
+
+    mock_ec2.describe_spot_price_history.side_effect = ClientError(
+        error_response={"Error": {"Code": "UnauthorizedAccess", "Message": "You are not authorized"}},
+        operation_name="DescribeSpotPriceHistory",
+    )
+    with pytest.raises(ClientError):
+        core._fetch_region_prices(
+            "us-east-1",
+            ["t3.micro"],
+            dt.datetime(2025, 10, 1, tzinfo=dt.timezone.utc),
+            dt.datetime(2025, 10, 2, tzinfo=dt.timezone.utc),
+            "Linux/UNIX",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Progress callback tests (folded from test_core_progress.py)
 # ---------------------------------------------------------------------------
