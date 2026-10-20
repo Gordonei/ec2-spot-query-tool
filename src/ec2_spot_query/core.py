@@ -15,6 +15,8 @@ import botocore.config
 import botocore.exceptions
 import pandas as pd
 
+from ec2_spot_query import cache
+
 # Adaptive retry config to handle RequestLimitExceeded / ThrottlingException
 _EC2_CONFIG = botocore.config.Config(
     retries={'max_attempts': 10, 'mode': 'adaptive'},
@@ -507,6 +509,7 @@ def _compute_group_metrics(grp_sorted: pd.DataFrame, itype: str, region_az: str)
         "region": region_az.rsplit("/", 1)[0],
         "instance_type": itype,
         "current_price": last_price,
+        "placement_score": None,
     }
 
     for wname, wdelta in _WINDOWS.items():
@@ -588,6 +591,7 @@ def _empty_result() -> pd.DataFrame:
         "1h_mean", "1h_vol", "6h_mean", "6h_vol",
         "12h_mean", "12h_vol", "1d_mean", "1d_vol",
         "1w_mean", "1w_vol", "1m_mean", "1m_vol",
+        "placement_score",
     ]
     return pd.DataFrame(columns=ncols)
 
@@ -623,3 +627,158 @@ def aggregate_by_region(
         result_df = result_df.sort_values(sort_by, ascending=False).reset_index(drop=True)
 
     return result_df
+
+
+# ---------------------------------------------------------------------------
+# Spot Placement Score helpers
+# ---------------------------------------------------------------------------
+
+_PLACEMENT_SCORE_REGION_BATCH = 10
+
+
+def get_az_id_mapping(region: str) -> dict[str, str]:
+    """Resolve AZ names to AZ IDs for the given region.
+
+    Returns a mapping ``{"us-east-1a": "eun1-az2", ...}``.
+    Results are cached on disk (1-year TTL) since AZ IDs are stable per
+    account/region.
+    """
+    # Check cache first
+    az_map_key = cache.make_az_map_cache_key(region)
+    cached = cache.load_cache(az_map_key, ttl_seconds=cache.AZ_MAP_TTL_SECONDS)
+    if cached is not None:
+        return cached
+
+    try:
+        # Create a per-region client because describe_availability_zones
+        # with a region-name filter only works from within that region
+        client = boto3.client("ec2", region_name=region, config=_DEFAULT_CLIENT.meta.config)
+        resp = client.describe_availability_zones()
+    except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as e:
+        if isinstance(e, botocore.exceptions.ClientError):
+            code = e.response["Error"]["Code"]
+            message = e.response["Error"].get("Message", "")
+            logger.warning(
+                "describe_availability_zones (%s): %s - %s",
+                region, code, message,
+            )
+        else:
+            logger.warning("describe_availability_zones (%s): %s", region, e)
+        return {}
+
+    mapping: dict[str, str] = {
+        zone["ZoneName"]: zone["ZoneId"]
+        for zone in resp.get("AvailabilityZones", [])
+    }
+    # Cache with long TTL (AZ IDs rarely change)
+    cache.save_cache(az_map_key, mapping, ttl_seconds=cache.AZ_MAP_TTL_SECONDS)
+    return mapping
+
+
+def get_spot_placement_scores(
+    instance_types: list[str],
+    regions: list[str],
+    target_capacity: int = 1,
+) -> dict[str, dict[str, dict[str, int]]]:
+    """Fetch Spot Placement Scores across regions.
+
+    Returns a nested dict: ``{region: {instance_type: {az_name: score}}}``
+    where *score* is an integer 1–10.
+
+    The AWS API returns scores per AZ (same for all instance types in that AZ),
+    so scores are replicated across all requested instance types.
+
+    Regions are batched in chunks of 10 per API call.
+    AZ IDs in the response are resolved back to human-readable names.
+    """
+    # Build AZ ID → (az_name, region) lookup
+    az_id_to_info: dict[str, tuple[str, str]] = {}
+    for reg in regions:
+        az_mapping = get_az_id_mapping(reg)
+        id_to_name: dict[str, str] = {v: k for k, v in az_mapping.items()}
+        for az_id, az_name in id_to_name.items():
+            az_id_to_info[az_id] = (az_name, reg)
+
+    result: dict[str, dict[str, dict[str, int]]] = {}
+    for reg in regions:
+        result[reg] = {}
+        for itype in instance_types:
+            result[reg][itype] = {}
+
+    # Batch regions into groups of 10 per API call
+    for i in range(0, len(regions), _PLACEMENT_SCORE_REGION_BATCH):
+        batch = regions[i:i + _PLACEMENT_SCORE_REGION_BATCH]
+        try:
+            resp = _DEFAULT_CLIENT.get_spot_placement_scores(
+                InstanceTypes=instance_types,
+                RegionNames=batch,
+                SingleAvailabilityZone=True,
+                TargetCapacity=target_capacity,
+            )
+        except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as e:
+            if isinstance(e, botocore.exceptions.ClientError):
+                code = e.response["Error"]["Code"]
+                message = e.response["Error"].get("Message", "")
+                logger.warning(
+                    "get_spot_placement_scores (%s): %s - %s",
+                    ", ".join(batch), code, message,
+                )
+            else:
+                logger.warning(
+                    "get_spot_placement_scores (%s): %s", ", ".join(batch), e,
+                )
+            continue
+
+        for score_entry in resp.get("SpotPlacementScores", []):
+            az_id = score_entry.get("AvailabilityZoneId", "")
+            score = score_entry.get("Score", 0)
+
+            info = az_id_to_info.get(az_id)
+            if info is None:
+                continue
+
+            az_name, reg = info
+
+            # Score is per AZ — replicate across all instance types
+            for itype in instance_types:
+                result[reg][itype][az_name] = score
+
+    return result
+
+
+def filter_by_placement_score(
+    df: pd.DataFrame,
+    min_score: int,
+    scores: dict[str, dict[str, dict[str, int]]],
+) -> pd.DataFrame:
+    """Drop rows whose (instance_type, region, az) placement score is < min_score.
+
+    If no placement score is available for a row, it is kept (no filtering).
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+    mask = pd.Series(True, index=df.index)
+
+    for _, row in df.iterrows():
+        region = row.get("region", "")
+        itype = row.get("instance_type", "")
+        region_az = row.get("region_az", "")
+
+        score = row.get("placement_score")
+        if score is None:
+            # No score data — keep row
+            continue
+
+        # Look up the score from the placement scores dict
+        expected_score = scores.get(region, {}).get(itype, {}).get(region_az.rsplit("/", 1)[-1], None)
+
+        if expected_score is None:
+            # No score data available for this row — keep it
+            continue
+
+        if expected_score < min_score:
+            mask.loc[row.name] = False
+
+    return df.loc[mask].reset_index(drop=True)

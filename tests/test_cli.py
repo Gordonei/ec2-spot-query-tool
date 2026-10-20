@@ -137,6 +137,7 @@ def test_help_flag_lists_all_options():
         "--min-vcpu", "--max-vcpu", "--min-ram", "--max-ram",
         "--min-gpu", "--max-gpu", "--min-instance-storage", "--max-instance-storage",
         "--progress", "--debug", "--arch", "--architecture",
+        "--placement-score", "--min-placement-score", "--target-capacity",
     ]:
         assert flag in result.stdout, f"Missing {flag} in --help output"
 

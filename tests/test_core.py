@@ -50,6 +50,7 @@ def test_compute_metrics_has_correct_columns():
         "1d_mean", "1d_vol",
         "1w_mean", "1w_vol",
         "1m_mean", "1m_vol",
+        "placement_score",
     ]
     assert list(result.columns) == expected_cols
 

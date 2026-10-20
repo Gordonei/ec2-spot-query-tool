@@ -13,6 +13,7 @@ CACHE_FILENAME = "ec2-spot-cache.json"
 SPOT_TTL_SECONDS = 3600  # 1 hour
 INSTANCE_TTL_SECONDS = 31536000  # 1 year (365 days)
 REGIONS_TTL_SECONDS = 2592000  # 1 month (30 days)
+AZ_MAP_TTL_SECONDS = 31536000  # 1 year (AZ ID mappings rarely change)
 
 
 def get_cache_path() -> Path:
@@ -93,3 +94,8 @@ def make_spot_cache_key(instance_type: str, regions: list[str]) -> str:
     """
     sorted_regions = ",".join(sorted(regions))
     return f"spot:{instance_type}:{sorted_regions}"
+
+
+def make_az_map_cache_key(region: str) -> str:
+    """Build a cache key for AZ ID mappings in a region."""
+    return f"az_map:{region}"

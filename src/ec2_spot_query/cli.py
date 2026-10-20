@@ -87,7 +87,7 @@ def _make_progress_handler(console: Console, use_progress: bool) -> Callable[[st
 # Rendering
 # ---------------------------------------------------------------------------
 
-def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int = -1, per_az: bool = False) -> None:
+def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int = -1, per_az: bool = False, with_score: bool = False) -> None:
     """Render result DataFrame as a rich table to stdout."""
     console = Console()
 
@@ -114,8 +114,12 @@ def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int =
     table.add_column("1w Vol")
     table.add_column("1m Avg")
     table.add_column("1m Vol")
+    if with_score:
+        table.add_column("Score")
 
     for _, row in result_df.iterrows():
+        score_val = row.get("placement_score")
+        score_str = str(score_val) if score_val is not None else "N/A"
         table.add_row(
             str(row["region_az"] if per_az else row["region"]),
             str(row["instance_type"]),
@@ -132,6 +136,7 @@ def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int =
             f"{row['1w_vol']:.4f}",
             f"{row['1m_mean']:.3f}",
             f"{row['1m_vol']:.4f}",
+            score_str,
         )
 
     console.print(table)
@@ -164,6 +169,9 @@ def main(
     product_description: str = typer.Option("Linux/UNIX", "--product-description", help="Product description filter for spot price queries (e.g. Linux/UNIX, Windows, SUSE Linux)"),
     debug: bool = typer.Option(False, "--debug", help="Show detailed EC2 API request/response logs"),
     arch: list[str] | None = typer.Option(None, "--arch", "--architecture", help="Filter by processor architecture. Aliases: x86, arm, graviton, mac. Official values: x86_64, arm64, riscv64, x86_64_mac, arm64_mac. Repeat the flag for multiple architectures."),
+    placement_score: bool = typer.Option(False, "--placement-score", help="Query AWS Spot Placement Scores for capacity availability"),
+    min_placement_score: int = typer.Option(5, "--min-placement-score", help="Minimum placement score threshold (1-10, default: 5)"),
+    target_capacity: int = typer.Option(1, "--target-capacity", help="Target capacity for placement score queries (default: 1)"),
 ) -> None:
     """Analyse and rank AWS EC2 Spot instance prices."""
     if ctx.invoked_subcommand is not None:
@@ -340,17 +348,62 @@ def main(
             if not raw and _skip_count["count"] > 0:
                 _log("error", f"All {_skip_count['count']} region queries failed — check logs for details")
 
+        # Fetch placement scores (if enabled)
+        placement_scores: dict[str, dict[str, dict[str, int]]] = {}
+        if placement_score:
+            _log("query", f"Fetching Spot Placement Scores for {len(ipts)} instance types across {len(regions_list)} regions (target_capacity={target_capacity})")
+            placement_scores = core.get_spot_placement_scores(
+                ipts,
+                regions_list,
+                target_capacity=target_capacity,
+            )
+            scored_regions = len(placement_scores)
+            scored_types = sum(len(rt) for rt in placement_scores.values())
+            _log("complete", f"Retrieved placement scores for {scored_regions} region(s), {scored_types} instance type(s)")
+
         # Compute metrics
         _log("query", f"Computing metrics for {len(raw):,} price points across 6 time windows")
         result = core.compute_metrics(raw, sort_by=sort_by)
+
+        # Inject placement scores and filter (before aggregation for per-region output)
+        if placement_scores:
+            # Map placement scores back to the result DataFrame
+            def _assign_score(row):
+                region = row.get("region")
+                itype = row.get("instance_type")
+                region_az = row.get("region_az")
+                # Guard against NaN values (empty DataFrame case in pandas 3.x)
+                if pd.isna(region) or pd.isna(itype) or pd.isna(region_az):
+                    return None
+                region = str(region) or ""
+                itype = str(itype) or ""
+                region_az = str(region_az) or ""
+                az_name = region_az.rsplit("/", 1)[-1] if "/" in region_az else region_az
+                az_scores = placement_scores.get(region, {}).get(itype, {})
+                return az_scores.get(az_name)
+
+            result = result.copy()
+            scores_series = result.apply(_assign_score, axis=1)
+            result["placement_score"] = scores_series
+            _log("info", f"Assigned placement scores to {result['placement_score'].notna().sum()} of {len(result)} rows")
+
+            # Apply min placement score filter (before aggregation so the best AZ is from filtered set)
+            if min_placement_score > 1:
+                before = len(result)
+                result = core.filter_by_placement_score(result, min_score=min_placement_score, scores=placement_scores)
+                dropped = before - len(result)
+                if dropped > 0:
+                    _log("info", f"Filtered out {dropped} rows below min placement score {min_placement_score}")
+
         if not per_az:
             _log("info", "Aggregating results to region level (lowest price per AZ per region)")
             result = core.aggregate_by_region(result, sort_by=sort_by)
+
         _log("complete", f"Computed metrics for {len(result)} instance×region pairs (sorted by {sort_by})", {"rows": len(result)})
 
         # Render
         _log("info", f"Rendering {len(result)} rows")
-        render_table(result, sort_by=sort_by, limit=limit, per_az=per_az)
+        render_table(result, sort_by=sort_by, limit=limit, per_az=per_az, with_score=placement_score)
 
     except Exception as e:
         _log("error", str(e))
