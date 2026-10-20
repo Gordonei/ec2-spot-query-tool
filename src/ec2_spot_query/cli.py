@@ -212,6 +212,32 @@ def main(
         # Map architecture aliases to official values (fails fast on unknown values)
         mapped_archs = core.map_architectures(arch)
 
+        # Resolve regions first (needed for multi-region instance type catalog)
+        regions_need_expansion = bool(regions) and any(core.has_glob(p) for p in regions)
+        regions_to_use = None if (all_regions or regions_need_expansion) else regions
+        if not regions_to_use:
+            _log("query", "Fetching region list from AWS")
+            regions_cache_key = "regions"
+            if not no_cache:
+                regions_to_use = cache.load_cache(regions_cache_key, ttl_seconds=cache.REGIONS_TTL_SECONDS)
+                if regions_to_use:
+                    _log("info", f"Using cached region list ({len(regions_to_use)} regions)", {"regions": regions_to_use})
+            if not regions_to_use or no_cache_lookup:
+                regions_to_use = core.list_regions()
+                if not regions_to_use:
+                    raise typer.Exit(code=1)
+                if not no_cache:
+                    cache.save_cache(regions_cache_key, regions_to_use, ttl_seconds=cache.REGIONS_TTL_SECONDS)
+                _log("info", f"Found {len(regions_to_use)} regions")
+            if regions_need_expansion:
+                for p in regions:
+                    if core.has_glob(p) and not core.match_names(regions_to_use, p):
+                        _log("warn", f"No regions match pattern '{p}'")
+                regions_to_use = core.expand_names(regions_to_use, regions)
+                _log("complete", f"Expanded region patterns to {len(regions_to_use)} regions: {', '.join(regions_to_use)}")
+
+        regions_list = sorted(regions_to_use)
+
         # Resolve instance types (with cache)
         ipts = instance_types or []
         if ipts:
