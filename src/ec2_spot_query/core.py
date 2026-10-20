@@ -22,7 +22,7 @@ _EC2_CONFIG = botocore.config.Config(
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REGION = "eu-west-1"
+DEFAULT_REGION = "us-east-1"
 _DEFAULT_CLIENT = boto3.client("ec2", region_name=DEFAULT_REGION, config=_EC2_CONFIG)
 BATCH_SIZE = 50
 
@@ -139,6 +139,37 @@ _WINDOWS = {
 }
 
 
+def _filter_instance(
+    inst: dict[str, Any],
+    min_vcpu: int,
+    max_vcpu: int,
+    min_ram_gb: float,
+    max_ram_gb: float,
+    min_gpu: int,
+    max_gpu: int,
+    min_instance_storage_gb: float,
+    max_instance_storage_gb: float,
+) -> bool:
+    """Return True if *inst* satisfies all hardware constraints."""
+    vcpus = inst.get("VCpuInfo", {}).get("DefaultVCpus", 0)
+    mem_mi = inst.get("MemoryInfo", {}).get("SizeInMiB", 0)
+    mem_gb = mem_mi / 1024
+    gpus = inst.get("GpuInfo", {}).get("Gpus", [{}])[0].get("Count", 0)
+    storage_info = inst.get("InstanceStorageInfo")
+    if isinstance(storage_info, dict):
+        storage_gb = storage_info.get("TotalSizeInGB", 0)
+    elif isinstance(storage_info, list):
+        storage_gb = sum(d.get("TotalSizeInGB", 0) for d in storage_info)
+    else:
+        storage_gb = 0
+    return (
+        vcpus >= min_vcpu and vcpus <= max_vcpu and
+        mem_gb >= min_ram_gb and mem_gb <= max_ram_gb and
+        gpus >= min_gpu and gpus <= max_gpu and
+        storage_gb >= min_instance_storage_gb and storage_gb <= max_instance_storage_gb
+    )
+
+
 def resolve_instance_types(
     instance_types: list[str] | None,
     min_vcpu: int,
@@ -150,6 +181,7 @@ def resolve_instance_types(
     min_instance_storage_gb: float,
     max_instance_storage_gb: float,
     architectures: list[str] | None = None,
+    regions: list[str] | None = None,
 ) -> list[str]:
     """Resolve target instance types from input or EC2 describe_instance_types call.
 
@@ -160,6 +192,15 @@ def resolve_instance_types(
     When *architectures* is non-empty, a ``processor-info.supported-architecture``
     filter is passed to ``describe_instance_types`` so that unwanted
     architectures never reach the spot-price fetch stage.
+
+    When *regions* is provided (non-empty list), ``describe_instance_types`` is
+    called from **each** region and results are unioned.  This is needed because
+    the API is regional — a single region's catalog may not list instance types
+    that are available in other regions.
+
+    When *regions* is ``None`` (the default), the shared ``_DEFAULT_CLIENT``
+    (us-east-1) is used — a single call.  This preserves backward compatibility
+    for callers that don't specify regions.
 
     Raises:
         ValueError: If any max parameter is less than its corresponding min
@@ -203,44 +244,79 @@ def resolve_instance_types(
                 valid = ", ".join(sorted(_OFFICIAL_ARCHITECTURES))
                 raise ValueError(f"Unsupported architecture {arch!r}. Valid values: {valid}")
 
-    client = _DEFAULT_CLIENT
-    t0 = time.perf_counter()
+    # Build the describe call kwargs (shared across all regions)
     describe_kwargs: dict[str, Any] = {}
     if architectures:
         describe_kwargs["Filters"] = [
             {"Name": "processor-info.supported-architecture", "Values": list(architectures)},
         ]
-    resp = client.describe_instance_types(**describe_kwargs)
-    elapsed = time.perf_counter() - t0
-    record_count = len(resp.get("InstanceTypes", []))
-    resp_meta = resp.get("ResponseMetadata", {})
-    retries = _get_retry_count(resp_meta)
-    parts = [f"-> {record_count} types in {elapsed*1000:.0f}ms"]
-    if retries > 0:
-        parts.append(f"{retries} retries")
-    if architectures:
-        parts.append(f"arch[{','.join(architectures)}]")
-    logger.debug("EC2 describe_instance_types (%s) %s", DEFAULT_REGION, ", ".join(parts))
 
-    result: list[str] = []
-    for inst in resp.get("InstanceTypes", []):
-        vcpus = inst.get("VCpuInfo", {}).get("DefaultVCpus", 0)
-        mem_mi = inst.get("MemoryInfo", {}).get("SizeInMiB", 0)
-        mem_gb = mem_mi / 1024
-        gpus = inst.get("GpuInfo", {}).get("Gpus", [{}])[0].get("Count", 0)
-        storage_info = inst.get("InstanceStorageInfo")
-        if isinstance(storage_info, dict):
-            storage_gb = storage_info.get("TotalSizeInGB", 0)
-        elif isinstance(storage_info, list):
-            storage_gb = sum(d.get("TotalSizeInGB", 0) for d in storage_info)
-        else:
-            storage_gb = 0
-        if (vcpus >= min_vcpu and vcpus <= max_vcpu and
-            mem_gb >= min_ram_gb and mem_gb <= max_ram_gb and
-            gpus >= min_gpu and gpus <= max_gpu and
-            storage_gb >= min_instance_storage_gb and storage_gb <= max_instance_storage_gb):
-            result.append(inst["InstanceType"])
-    return list(set(result))
+    if regions:
+        # Multi-region: query each region and union results
+        all_result: set[str] = set()
+        total_count = 0
+        for reg in regions:
+            try:
+                client = boto3.client("ec2", region_name=reg, config=_EC2_CONFIG)
+                t0 = time.perf_counter()
+                resp = client.describe_instance_types(**describe_kwargs)
+                elapsed = time.perf_counter() - t0
+                record_count = len(resp.get("InstanceTypes", []))
+                resp_meta = resp.get("ResponseMetadata", {})
+                retries = _get_retry_count(resp_meta)
+                parts = [f"-> {record_count} types in {elapsed*1000:.0f}ms"]
+                if retries > 0:
+                    parts.append(f"{retries} retries")
+                if architectures:
+                    parts.append(f"arch[{','.join(architectures)}]")
+                logger.debug("EC2 describe_instance_types (%s) %s", reg, ", ".join(parts))
+
+                for inst in resp.get("InstanceTypes", []):
+                    if _filter_instance(
+                        inst, min_vcpu, max_vcpu,
+                        min_ram_gb, max_ram_gb,
+                        min_gpu, max_gpu,
+                        min_instance_storage_gb, max_instance_storage_gb,
+                    ):
+                        all_result.add(inst["InstanceType"])
+                total_count += record_count
+            except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as e:
+                if isinstance(e, botocore.exceptions.ClientError):
+                    code = e.response["Error"].get("Code", "Unknown")
+                    logger.warning("describe_instance_types (%s): %s (region skipped)", reg, code)
+                else:
+                    logger.warning("describe_instance_types (%s): %s (region skipped)", reg, e)
+
+        logger.info("EC2 describe_instance_types (%d regions): %d unique types across %d total responses",
+                     len(regions), len(all_result), total_count)
+        return sorted(all_result)
+
+    else:
+        # Fallback: single call from _DEFAULT_CLIENT (us-east-1)
+        client = _DEFAULT_CLIENT
+        t0 = time.perf_counter()
+        resp = client.describe_instance_types(**describe_kwargs)
+        elapsed = time.perf_counter() - t0
+        record_count = len(resp.get("InstanceTypes", []))
+        resp_meta = resp.get("ResponseMetadata", {})
+        retries = _get_retry_count(resp_meta)
+        parts = [f"-> {record_count} types in {elapsed*1000:.0f}ms"]
+        if retries > 0:
+            parts.append(f"{retries} retries")
+        if architectures:
+            parts.append(f"arch[{','.join(architectures)}]")
+        logger.debug("EC2 describe_instance_types (%s) %s", DEFAULT_REGION, ", ".join(parts))
+
+        result: list[str] = []
+        for inst in resp.get("InstanceTypes", []):
+            if _filter_instance(
+                inst, min_vcpu, max_vcpu,
+                min_ram_gb, max_ram_gb,
+                min_gpu, max_gpu,
+                min_instance_storage_gb, max_instance_storage_gb,
+            ):
+                result.append(inst["InstanceType"])
+        return list(set(result))
 
 
 def list_regions() -> list[str]:
@@ -253,13 +329,31 @@ def list_regions() -> list[str]:
     return [r["RegionName"] for r in resp.get("Regions", [])]
 
 
-def list_instance_types() -> list[str]:
+def list_instance_types(regions: list[str] | None = None) -> list[str]:
     """Return all EC2 instance type names.
 
-    ``describe_instance_types`` is queried without filters on the shared
-    default-region client (a global catalog).  Used to expand glob patterns
-    such as ``inf2.*``.
+    When *regions* is provided, ``describe_instance_types`` is queried from
+    each region and results are unioned (deduplicated).  This is needed because
+    the API is regional — a single region's catalog may not list all types.
+
+    When *regions* is ``None``, the shared ``_DEFAULT_CLIENT`` (us-east-1) is
+    used.  Used to expand glob patterns such as ``inf2.*``.
     """
+    if regions:
+        all_names: set[str] = set()
+        for reg in regions:
+            try:
+                client = boto3.client("ec2", region_name=reg, config=_EC2_CONFIG)
+                resp = client.describe_instance_types()
+                all_names.update(inst["InstanceType"] for inst in resp.get("InstanceTypes", []))
+            except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError) as e:
+                if isinstance(e, botocore.exceptions.ClientError):
+                    code = e.response["Error"].get("Code", "Unknown")
+                    logger.warning("describe_instance_types (%s): %s (region skipped)", reg, code)
+                else:
+                    logger.warning("describe_instance_types (%s): %s (region skipped)", reg, e)
+        return sorted(all_names)
+
     resp = _DEFAULT_CLIENT.describe_instance_types()
     return [inst["InstanceType"] for inst in resp.get("InstanceTypes", [])]
 

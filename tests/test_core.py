@@ -6,6 +6,7 @@ pytest_plugins = ("tests.test_utils",)
 
 import datetime as dt
 
+import botocore.exceptions
 import pandas as pd
 import pytest
 from unittest.mock import MagicMock, patch
@@ -864,6 +865,120 @@ def test_resolve_invalid_architecture_raises():
                 architectures=["sparc"],
             )
     mock_client.describe_instance_types.assert_not_called()
+
+
+def test_resolve_with_regions_queries_each_region():
+    """When regions are provided, describe_instance_types is called per-region."""
+    mock_region1 = MagicMock()
+    mock_region1.describe_instance_types.return_value = {
+        "InstanceTypes": [
+            {"InstanceType": "c5d.2xlarge", "VCpuInfo": {"DefaultVCpus": 8}, "MemoryInfo": {"SizeInMiB": 65536}},
+        ]
+    }
+    mock_region2 = MagicMock()
+    mock_region2.describe_instance_types.return_value = {
+        "InstanceTypes": [
+            {"InstanceType": "r5dn.2xlarge", "VCpuInfo": {"DefaultVCpus": 8}, "MemoryInfo": {"SizeInMiB": 1048576}},
+        ]
+    }
+
+    call_count = {"count": 0}
+
+    def mock_boto3_client(service_name, region_name=None, config=None):
+        idx = call_count["count"]
+        call_count["count"] += 1
+        return [mock_region1, mock_region2][idx]
+
+    with patch("ec2_spot_query.core.boto3.client", side_effect=mock_boto3_client):
+        result = core.resolve_instance_types(
+            instance_types=[],
+            min_vcpu=8, min_ram_gb=64, min_gpu=0,
+            max_vcpu=256, max_ram_gb=2048, max_gpu=8,
+            min_instance_storage_gb=0, max_instance_storage_gb=4096,
+            architectures=["x86_64"],
+            regions=["us-east-1", "eu-west-1"],
+        )
+    assert result == ["c5d.2xlarge", "r5dn.2xlarge"]
+    assert call_count["count"] == 2  # one call per region
+
+
+def test_resolve_regions_failure_skips_region():
+    """A region that raises ClientError is skipped, others still processed."""
+    mock_region_ok = MagicMock()
+    mock_region_ok.describe_instance_types.return_value = {
+        "InstanceTypes": [
+            {"InstanceType": "c5d.2xlarge", "VCpuInfo": {"DefaultVCpus": 8}, "MemoryInfo": {"SizeInMiB": 65536}},
+        ]
+    }
+    mock_region_fail = MagicMock()
+    mock_region_fail.describe_instance_types.side_effect = botocore.exceptions.ClientError(
+        {"Error": {"Code": "UnauthorizedOperation", "Message": "Not authorized"}},
+        "DescribeInstanceTypes",
+    )
+
+    def mock_boto3_client(service_name, region_name=None, config=None):
+        return mock_region_ok if region_name == "us-east-1" else mock_region_fail
+
+    with patch("ec2_spot_query.core.boto3.client", side_effect=mock_boto3_client):
+        result = core.resolve_instance_types(
+            instance_types=[],
+            min_vcpu=8, min_ram_gb=64, min_gpu=0,
+            max_vcpu=256, max_ram_gb=2048, max_gpu=8,
+            min_instance_storage_gb=0, max_instance_storage_gb=4096,
+            regions=["us-east-1", "eu-west-1"],
+        )
+    assert result == ["c5d.2xlarge"]
+
+
+def test_resolve_regions_none_uses_fallback(mock_ec2):
+    """regions=None falls back to single _DEFAULT_CLIENT call."""
+    mock_ec2.describe_instance_types.return_value = {
+        "InstanceTypes": [
+            {"InstanceType": "t3.micro", "VCpuInfo": {"DefaultVCpus": 2}, "MemoryInfo": {"SizeInMiB": 1024}},
+        ]
+    }
+    result = core.resolve_instance_types(
+        instance_types=[],
+        min_vcpu=0, min_ram_gb=0.5, min_gpu=0,
+        max_vcpu=64, max_ram_gb=128, max_gpu=8,
+        min_instance_storage_gb=0, max_instance_storage_gb=256,
+        regions=None,
+    )
+    assert result == ["t3.micro"]
+    mock_ec2.describe_instance_types.assert_called_once()
+
+
+def test_list_instance_types_with_regions_queries_each(mock_ec2, mocker):
+    """When regions provided, each region's describe_instance_types is called."""
+    mock_eu = MagicMock()
+    mock_eu.describe_instance_types.return_value = {
+        "InstanceTypes": [{"InstanceType": "c5d.2xlarge"}, {"InstanceType": "r5dn.2xlarge"}]
+    }
+    mock_us = MagicMock()
+    mock_us.describe_instance_types.return_value = {
+        "InstanceTypes": [{"InstanceType": "c5d.2xlarge"}, {"InstanceType": "t3.micro"}]
+    }
+
+    def mock_boto3_client(service_name, region_name=None, config=None):
+        return mock_eu if region_name == "eu-west-1" else mock_us
+
+    mocker.patch("ec2_spot_query.core.boto3.client", side_effect=mock_boto3_client)
+
+    result = core.list_instance_types(regions=["eu-west-1", "us-east-1"])
+    assert result == ["c5d.2xlarge", "r5dn.2xlarge", "t3.micro"]
+
+
+def test_list_instance_types_without_regions_uses_default(mock_ec2):
+    """regions=None falls back to single _DEFAULT_CLIENT call."""
+    mock_ec2.describe_instance_types.return_value = {
+        "InstanceTypes": [
+            {"InstanceType": "c5d.2xlarge"},
+            {"InstanceType": "r5dn.2xlarge"},
+        ]
+    }
+    result = core.list_instance_types(regions=None)
+    assert result == ["c5d.2xlarge", "r5dn.2xlarge"]
+    mock_ec2.describe_instance_types.assert_called_once()
 
 
 def test_no_progress_unchanged_behavior(mock_ec2):

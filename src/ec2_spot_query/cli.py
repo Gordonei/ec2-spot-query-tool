@@ -214,7 +214,7 @@ def main(
                     if all_types:
                         _log("info", f"Using cached instance type catalog ({len(all_types)} types)", {"types": all_types})
                 if all_types is None or no_cache_lookup:
-                    all_types = core.list_instance_types()
+                    all_types = core.list_instance_types(regions=regions_list)
                     if not all_types:
                         raise typer.Exit(code=1)
                     if not no_cache:
@@ -237,6 +237,8 @@ def main(
             resolve_cache_key = f"resolve:vcpu{min_vcpu}-{max_vcpu}:ram{min_ram}-{max_ram}:gpu{min_gpu}-{max_gpu}:storage{min_instance_storage}-{max_instance_storage}"
             if mapped_archs:
                 resolve_cache_key += f":arch{','.join(mapped_archs)}"
+            if regions_list:
+                resolve_cache_key += f":regions{','.join(regions_list)}"
             ipts = None
             if not no_cache:
                 ipts = cache.load_cache(resolve_cache_key, ttl_seconds=cache.INSTANCE_TTL_SECONDS)
@@ -254,36 +256,12 @@ def main(
                     min_instance_storage_gb=min_instance_storage,
                     max_instance_storage_gb=max_instance_storage,
                     architectures=mapped_archs,
+                    regions=regions_list,
                 )
                 if not no_cache:
                     cache.save_cache(resolve_cache_key, ipts, ttl_seconds=cache.INSTANCE_TTL_SECONDS)
             _log("complete", f"Found {len(ipts)} types: {', '.join(ipts)}", {"types": ipts})
 
-        # Resolve regions (discover from AWS if --all-regions or glob patterns, cached)
-        regions_need_expansion = bool(regions) and any(core.has_glob(p) for p in regions)
-        regions_to_use = None if (all_regions or regions_need_expansion) else regions
-        if not regions_to_use:
-            _log("query", "Fetching region list from AWS")
-            regions_cache_key = "regions"
-            if not no_cache:
-                regions_to_use = cache.load_cache(regions_cache_key, ttl_seconds=cache.REGIONS_TTL_SECONDS)
-                if regions_to_use:
-                    _log("info", f"Using cached region list ({len(regions_to_use)} regions)", {"regions": regions_to_use})
-            if not regions_to_use or no_cache_lookup:
-                regions_to_use = core.list_regions()
-                if not regions_to_use:
-                    raise typer.Exit(code=1)
-                if not no_cache:
-                    cache.save_cache(regions_cache_key, regions_to_use, ttl_seconds=cache.REGIONS_TTL_SECONDS)
-                _log("info", f"Found {len(regions_to_use)} regions")
-            if regions_need_expansion:
-                for p in regions:
-                    if core.has_glob(p) and not core.match_names(regions_to_use, p):
-                        _log("warn", f"No regions match pattern '{p}'")
-                regions_to_use = core.expand_names(regions_to_use, regions)
-                _log("complete", f"Expanded region patterns to {len(regions_to_use)} regions: {', '.join(regions_to_use)}")
-
-        regions_list = sorted(regions_to_use)
         total_pairs = len(ipts) * len(regions_list)
 
         if not regions_need_expansion:
