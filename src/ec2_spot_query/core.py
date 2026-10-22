@@ -406,9 +406,12 @@ def _compute_group_metrics(
 ) -> dict[str, Any]:
     """Compute metric row for one (instance_type, region_az) group."""
     last_price = float(grp_sorted["SpotPrice"].iloc[-1])
+    # Read the region straight from the group data rather than re-parsing it
+    # out of the region_az key.
+    region = str(grp_sorted["Region"].iloc[0])
     row: dict[str, Any] = {
         "region_az": region_az,
-        "region": region_az.rsplit("/", 1)[0],
+        "region": region,
         "instance_type": itype,
         "current_price": last_price,
         "placement_score": None,
