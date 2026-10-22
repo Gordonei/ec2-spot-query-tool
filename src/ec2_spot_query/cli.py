@@ -168,7 +168,7 @@ def main(
     max_gpu: int = typer.Option(8, "--max-gpu", help="Maximum GPU count"),
     min_instance_storage: float = typer.Option(0, "--min-instance-storage", help="Minimum instance storage in GB"),
     max_instance_storage: float = typer.Option(256, "--max-instance-storage", help="Maximum instance storage in GB"),
-    regions: list[str] = typer.Option(None, "--regions", "-r", help="Regions to query. Supports glob patterns (*, ?, [seq]), e.g. 'eu-*'"),
+    regions: list[str] = typer.Option(None, "--region", "-r", help="Region to query. Supports glob patterns (*, ?, [seq]), e.g. 'eu-*'"),
     all_regions: bool = typer.Option(False, "--all-regions", help="Query all regions"),
     sort_by: str = typer.Option("1d_mean", "--sort-by", help="Sort metric (1h_mean, 6h_mean, 12h_mean, 1d_mean, 1w_mean, 1m_mean)"),
     limit: int = typer.Option(10, "--limit", help="Number of rows to display (-1 for all)"),

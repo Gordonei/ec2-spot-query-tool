@@ -40,7 +40,7 @@ class TestFullWorkflow:
         )
         result = runner.invoke(
             app,
-            ["--instance-type", "t3.micro", "--regions", "us-east-1", "--no-cache"],
+            ["--instance-type", "t3.micro", "--region", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         assert "EC2 Spot Instance Rankings" in result.stdout
@@ -96,7 +96,7 @@ class TestCacheHitFlow:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-type", "t3.micro", "--regions", "us-east-1"],
+                ["--instance-type", "t3.micro", "--region", "us-east-1"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -118,7 +118,7 @@ class TestCacheMissFlow:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-type", "t3.micro", "--regions", "us-east-1"],
+                ["--instance-type", "t3.micro", "--region", "us-east-1"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -138,7 +138,7 @@ class TestArchFilter:
         mocker.patch("ec2_spot_query.core.fetch_spot_prices", return_value=[])
         result = runner.invoke(
             app,
-            ["--arch", "graviton", "--regions", "us-east-1", "--no-cache"],
+            ["--arch", "graviton", "--region", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         assert mock_resolve.call_args.kwargs["architectures"] == ["arm64"]
@@ -151,7 +151,7 @@ class TestArchFilter:
         mocker.patch("ec2_spot_query.core.fetch_spot_prices", return_value=[])
         result = runner.invoke(
             app,
-            ["--arch", "x86", "--architecture", "arm", "--regions", "us-east-1", "--no-cache"],
+            ["--arch", "x86", "--architecture", "arm", "--region", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         assert mock_resolve.call_args.kwargs["architectures"] == ["x86_64", "arm64"]
@@ -163,7 +163,7 @@ class TestArchFilter:
         )
         mocker.patch("ec2_spot_query.core.fetch_spot_prices", return_value=[])
         result = runner.invoke(
-            app, ["--regions", "us-east-1", "--no-cache"]
+            app, ["--region", "us-east-1", "--no-cache"]
         )
         assert result.exit_code == 0, result.stdout
         assert mock_resolve.call_args.kwargs["architectures"] is None
@@ -180,7 +180,7 @@ class TestArchFilter:
             app,
             [
                 "--instance-type", "t3.micro", "--arch", "arm",
-                "--regions", "us-east-1", "--no-cache",
+                "--region", "us-east-1", "--no-cache",
             ],
         )
         assert result.exit_code == 0, result.stdout
@@ -193,7 +193,7 @@ class TestArchFilter:
         )
         result = runner.invoke(
             app,
-            ["--arch", "sparc", "--regions", "us-east-1", "--no-cache"],
+            ["--arch", "sparc", "--region", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 1
         combined = result.stdout + (result.stderr if result.stderr_bytes else "")
@@ -217,19 +217,19 @@ class TestArchFilter:
 
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
-                app, ["--arch", "arm", "--regions", "us-east-1"]
+                app, ["--arch", "arm", "--region", "us-east-1"]
             )
         assert result.exit_code == 0, result.stdout
         mock_resolve.assert_not_called()  # served from the arch-specific cache entry
 
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
-            result = runner.invoke(app, ["--regions", "us-east-1"])
+            result = runner.invoke(app, ["--region", "us-east-1"])
         assert result.exit_code == 0, result.stdout
         mock_resolve.assert_called_once()  # no-arch key differs, so it must resolve
 
 
 class TestGlobExpansion:
-    """Test glob pattern support in --regions and --instance-type."""
+    """Test glob pattern support in --region and --instance-type."""
 
     def test_region_glob_expands(self, mocker):
         """-r 'eu-*' expands against the discovered region list."""
@@ -242,20 +242,20 @@ class TestGlobExpansion:
         )
         result = runner.invoke(
             app,
-            ["--instance-type", "t3.micro", "--regions", "eu-*", "--no-cache"],
+            ["--instance-type", "t3.micro", "--region", "eu-*", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         assert mock_fetch.call_args.kwargs["regions"] == ["eu-central-1", "eu-west-1"]
 
     def test_region_literal_fast_path_skips_list_regions(self, mocker):
-        """Literal-only --regions never calls list_regions (fast path preserved)."""
+        """Literal-only --region never calls list_regions (fast path preserved)."""
         mock_list = mocker.patch("ec2_spot_query.core.list_regions")
         mock_fetch = mocker.patch(
             "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
         )
         result = runner.invoke(
             app,
-            ["--instance-type", "t3.micro", "--regions", "us-east-1", "--no-cache"],
+            ["--instance-type", "t3.micro", "--region", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         mock_list.assert_not_called()
@@ -272,7 +272,7 @@ class TestGlobExpansion:
         )
         result = runner.invoke(
             app,
-            ["--instance-type", "inf2.*", "--regions", "us-east-1", "--no-cache"],
+            ["--instance-type", "inf2.*", "--region", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         fetched = [c.args[0] for c in mock_fetch.call_args_list]
@@ -291,7 +291,7 @@ class TestGlobExpansion:
             app,
             [
                 "--instance-type", "t3.micro", "--instance-type", "inf2.*",
-                "--regions", "us-east-1", "--no-cache",
+                "--region", "us-east-1", "--no-cache",
             ],
         )
         assert result.exit_code == 0, result.stdout
@@ -309,7 +309,7 @@ class TestGlobExpansion:
         )
         result = runner.invoke(
             app,
-            ["--instance-type", "t3.micro", "--regions", "zzz-*", "--no-cache"],
+            ["--instance-type", "t3.micro", "--region", "zzz-*", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         mock_fetch.assert_not_called()
@@ -327,7 +327,7 @@ class TestGlobExpansion:
         )
         result = runner.invoke(
             app,
-            ["--instance-type", "zzz.*", "--regions", "us-east-1", "--no-cache"],
+            ["--instance-type", "zzz.*", "--region", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         mock_fetch.assert_not_called()
@@ -352,7 +352,7 @@ class TestGlobExpansion:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-type", "t3.micro", "--regions", "eu-*"],
+                ["--instance-type", "t3.micro", "--region", "eu-*"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -377,7 +377,7 @@ class TestGlobExpansion:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-type", "inf2.*", "--regions", "us-east-1"],
+                ["--instance-type", "inf2.*", "--region", "us-east-1"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -401,7 +401,7 @@ class TestGlobExpansion:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-type", "inf2.*", "--regions", "us-east-1"],
+                ["--instance-type", "inf2.*", "--region", "us-east-1"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -409,7 +409,7 @@ class TestGlobExpansion:
         assert saved["all_instance_types"]["data"] == ["t3.micro", "inf2.xlarge"]
 
     def test_help_mentions_glob_patterns(self):
-        """--help documents glob support for --regions and --instance-type."""
+        """--help documents glob support for --region and --instance-type."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         assert "glob" in result.stdout.lower()
@@ -430,7 +430,7 @@ class TestFlags:
             "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
         )
         result = runner.invoke(
-            app, ["--instance-type", "t3.micro", "--regions", "us-east-1", "--no-cache"]
+            app, ["--instance-type", "t3.micro", "--region", "us-east-1", "--no-cache"]
         )
         assert result.exit_code == 0
 
@@ -447,7 +447,7 @@ class TestFlags:
         )
         result = runner.invoke(
             app,
-            ["--instance-type", "t3.micro", "--regions", "us-east-1", "--debug", "--no-cache"],
+            ["--instance-type", "t3.micro", "--region", "us-east-1", "--debug", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
 
@@ -466,7 +466,7 @@ class TestPairLogging:
             app,
             [
                 "--instance-type", "t3.micro",
-                "--regions", "us-east-1", "--regions", "eu-west-1",
+                "--region", "us-east-1", "--region", "eu-west-1",
                 "--no-cache", "--progress",
             ],
         )
@@ -539,7 +539,7 @@ class TestRunningTotal:
                 app,
                 [
                     "--instance-type", "t3.micro", "--instance-type", "t3.large",
-                    "--regions", "us-east-1",
+                    "--region", "us-east-1",
                     "--progress",
                 ],
             )
@@ -595,7 +595,7 @@ class TestErrorHandling:
 
             mocker.patch("ec2_spot_query.core._fetch_region_prices", side_effect=_failing_fetch)
 
-            result = runner.invoke(app, ["--no-cache", "--regions", "us-east-1", "--regions", "eu-west-1"])
+            result = runner.invoke(app, ["--no-cache", "--region", "us-east-1", "--region", "eu-west-1"])
             assert result.exit_code == 0, result.stdout
             assert "All" in result.output and "region" in result.output and "failed" in result.output
             assert skip_counts["count"] == 2
