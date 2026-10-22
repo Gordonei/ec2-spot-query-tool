@@ -40,7 +40,7 @@ class TestFullWorkflow:
         )
         result = runner.invoke(
             app,
-            ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"],
+            ["--instance-type", "t3.micro", "--regions", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         assert "EC2 Spot Instance Rankings" in result.stdout
@@ -60,7 +60,7 @@ class TestAllRegions:
         )
         result = runner.invoke(
             app,
-            ["--instance-types", "t3.micro", "--all-regions", "--no-cache"],
+            ["--instance-type", "t3.micro", "--all-regions", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         mock_list.assert_called_once()
@@ -96,7 +96,7 @@ class TestCacheHitFlow:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-types", "t3.micro", "--regions", "us-east-1"],
+                ["--instance-type", "t3.micro", "--regions", "us-east-1"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -118,7 +118,7 @@ class TestCacheMissFlow:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-types", "t3.micro", "--regions", "us-east-1"],
+                ["--instance-type", "t3.micro", "--regions", "us-east-1"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -169,7 +169,7 @@ class TestArchFilter:
         assert mock_resolve.call_args.kwargs["architectures"] is None
 
     def test_arch_ignored_with_explicit_instance_types(self, mocker):
-        """Explicit --instance-types short-circuits resolution; no API filter needed."""
+        """Explicit --instance-type short-circuits resolution; no API filter needed."""
         mock_resolve = mocker.patch(
             "ec2_spot_query.core.resolve_instance_types", return_value=["t3.micro"]
         )
@@ -179,7 +179,7 @@ class TestArchFilter:
         result = runner.invoke(
             app,
             [
-                "--instance-types", "t3.micro", "--arch", "arm",
+                "--instance-type", "t3.micro", "--arch", "arm",
                 "--regions", "us-east-1", "--no-cache",
             ],
         )
@@ -229,7 +229,7 @@ class TestArchFilter:
 
 
 class TestGlobExpansion:
-    """Test glob pattern support in --regions and --instance-types."""
+    """Test glob pattern support in --regions and --instance-type."""
 
     def test_region_glob_expands(self, mocker):
         """-r 'eu-*' expands against the discovered region list."""
@@ -242,7 +242,7 @@ class TestGlobExpansion:
         )
         result = runner.invoke(
             app,
-            ["--instance-types", "t3.micro", "--regions", "eu-*", "--no-cache"],
+            ["--instance-type", "t3.micro", "--regions", "eu-*", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         assert mock_fetch.call_args.kwargs["regions"] == ["eu-central-1", "eu-west-1"]
@@ -255,7 +255,7 @@ class TestGlobExpansion:
         )
         result = runner.invoke(
             app,
-            ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"],
+            ["--instance-type", "t3.micro", "--regions", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         mock_list.assert_not_called()
@@ -272,7 +272,7 @@ class TestGlobExpansion:
         )
         result = runner.invoke(
             app,
-            ["--instance-types", "inf2.*", "--regions", "us-east-1", "--no-cache"],
+            ["--instance-type", "inf2.*", "--regions", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         fetched = [c.args[0] for c in mock_fetch.call_args_list]
@@ -290,7 +290,7 @@ class TestGlobExpansion:
         result = runner.invoke(
             app,
             [
-                "--instance-types", "t3.micro", "--instance-types", "inf2.*",
+                "--instance-type", "t3.micro", "--instance-type", "inf2.*",
                 "--regions", "us-east-1", "--no-cache",
             ],
         )
@@ -309,7 +309,7 @@ class TestGlobExpansion:
         )
         result = runner.invoke(
             app,
-            ["--instance-types", "t3.micro", "--regions", "zzz-*", "--no-cache"],
+            ["--instance-type", "t3.micro", "--regions", "zzz-*", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         mock_fetch.assert_not_called()
@@ -327,7 +327,7 @@ class TestGlobExpansion:
         )
         result = runner.invoke(
             app,
-            ["--instance-types", "zzz.*", "--regions", "us-east-1", "--no-cache"],
+            ["--instance-type", "zzz.*", "--regions", "us-east-1", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
         mock_fetch.assert_not_called()
@@ -352,7 +352,7 @@ class TestGlobExpansion:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-types", "t3.micro", "--regions", "eu-*"],
+                ["--instance-type", "t3.micro", "--regions", "eu-*"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -377,7 +377,7 @@ class TestGlobExpansion:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-types", "inf2.*", "--regions", "us-east-1"],
+                ["--instance-type", "inf2.*", "--regions", "us-east-1"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -401,7 +401,7 @@ class TestGlobExpansion:
         with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
             result = runner.invoke(
                 app,
-                ["--instance-types", "inf2.*", "--regions", "us-east-1"],
+                ["--instance-type", "inf2.*", "--regions", "us-east-1"],
             )
 
         assert result.exit_code == 0, result.stdout
@@ -409,7 +409,7 @@ class TestGlobExpansion:
         assert saved["all_instance_types"]["data"] == ["t3.micro", "inf2.xlarge"]
 
     def test_help_mentions_glob_patterns(self):
-        """--help documents glob support for --regions and --instance-types."""
+        """--help documents glob support for --regions and --instance-type."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
         assert "glob" in result.stdout.lower()
@@ -430,7 +430,7 @@ class TestFlags:
             "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
         )
         result = runner.invoke(
-            app, ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"]
+            app, ["--instance-type", "t3.micro", "--regions", "us-east-1", "--no-cache"]
         )
         assert result.exit_code == 0
 
@@ -447,7 +447,7 @@ class TestFlags:
         )
         result = runner.invoke(
             app,
-            ["--instance-types", "t3.micro", "--regions", "us-east-1", "--debug", "--no-cache"],
+            ["--instance-type", "t3.micro", "--regions", "us-east-1", "--debug", "--no-cache"],
         )
         assert result.exit_code == 0, result.stdout
 
@@ -465,7 +465,7 @@ class TestPairLogging:
         result = runner.invoke(
             app,
             [
-                "--instance-types", "t3.micro",
+                "--instance-type", "t3.micro",
                 "--regions", "us-east-1", "--regions", "eu-west-1",
                 "--no-cache", "--progress",
             ],
@@ -538,7 +538,7 @@ class TestRunningTotal:
             result = runner.invoke(
                 app,
                 [
-                    "--instance-types", "t3.micro", "--instance-types", "t3.large",
+                    "--instance-type", "t3.micro", "--instance-type", "t3.large",
                     "--regions", "us-east-1",
                     "--progress",
                 ],

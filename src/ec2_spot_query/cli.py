@@ -159,7 +159,7 @@ def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int =
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    instance_types: list[str] = typer.Option(None, "--instance-types", "-i", help="Instance types to query. Supports glob patterns (*, ?, [seq]), e.g. 'inf2.*'"),
+    instance_types: list[str] = typer.Option(None, "--instance-type", "-i", help="Instance type to query. Supports glob patterns (*, ?, [seq]), e.g. 'inf2.*'"),
     min_vcpu: int = typer.Option(0, "--min-vcpu", help="Minimum vCPUs"),
     min_ram: float = typer.Option(0.5, "--min-ram", help="Minimum RAM in GB"),
     min_gpu: int = typer.Option(0, "--min-gpu", help="Minimum GPU count"),
@@ -272,7 +272,7 @@ def main(
                 _log("complete", f"Expanded instance type patterns to {len(ipts)} types: {', '.join(ipts)}")
             _log("query", f"Using {len(ipts)} specified instance types")
             if mapped_archs:
-                _log("info", "Note: --arch is ignored when explicit --instance-types are given")
+                _log("info", "Note: --arch is ignored when explicit --instance-type values are given")
         else:
             arch_desc = ",".join(mapped_archs) if mapped_archs else "any"
             _log(

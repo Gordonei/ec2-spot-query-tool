@@ -146,7 +146,7 @@ def test_cli_invoke_with_placement_score(mock_ec2, tmp_path):
     with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
         result = runner.invoke(
             cli.app,
-            ["--instance-types", "t3.micro", "--regions", "us-east-1",
+            ["--instance-type", "t3.micro", "--regions", "us-east-1",
              "--no-cache", "--placement-score"],
         )
     assert result.exit_code == 0

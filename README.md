@@ -41,7 +41,7 @@ ec2-spot-query --min-vcpu 1 --max-vcpu 4 --min-ram 32 --max-ram 128
 
 | Flag | Description | Example |
 |------|-------------|---------|
-| `-i, --instance-types` | Specific instance types | `-i m7g.xlarge,c7g.2xlarge` |
+| `-i, --instance-type` | Specific instance types | `-i m7g.xlarge,c7g.2xlarge` |
 | `-r, --regions` | Limit to specific regions | `-r us-west-2,eu-west-1` |
 | `--sort-by` | Sort metric | `--sort-by 1m_mean` |
 | `--limit` | Rows to display | `--limit 20` |

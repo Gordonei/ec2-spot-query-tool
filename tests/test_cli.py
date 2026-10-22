@@ -132,7 +132,7 @@ def test_help_flag_lists_all_options():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     for flag in [
-        "--instance-types", "--regions", "--all-regions", "--sort-by",
+        "--instance-type", "--regions", "--all-regions", "--sort-by",
         "--limit", "--per-az", "--no-cache", "--no-cache-lookup",
         "--min-vcpu", "--max-vcpu", "--min-ram", "--max-ram",
         "--min-gpu", "--max-gpu", "--min-instance-storage", "--max-instance-storage",
@@ -155,5 +155,5 @@ def test_cli_invoke_no_errors(mock_ec2):
             }
         ]
     }
-    result = runner.invoke(app, ["--instance-types", "t3.micro", "--regions", "us-east-1", "--no-cache"])
+    result = runner.invoke(app, ["--instance-type", "t3.micro", "--regions", "us-east-1", "--no-cache"])
     assert result.exit_code == 0
