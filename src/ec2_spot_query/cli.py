@@ -20,7 +20,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from ec2_spot_query import cache, core
+from ec2_spot_query import cache, core, utils
 
 
 _DAYS_FOR_WINDOW: dict[str, int] = {
@@ -221,10 +221,10 @@ def main(
         _log("info", "Validating AWS credentials...")
 
         # Map architecture aliases to official values (fails fast on unknown values)
-        mapped_archs = core.map_architectures(arch)
+        mapped_archs = utils.map_architectures(arch)
 
         # Resolve regions first (needed for multi-region instance type catalog)
-        regions_need_expansion = bool(regions) and any(core.has_glob(p) for p in regions)
+        regions_need_expansion = bool(regions) and any(utils.has_glob(p) for p in regions)
         regions_to_use = None if (all_regions or regions_need_expansion) else regions
         if not regions_to_use:
             _log("query", "Fetching region list from AWS")
@@ -242,9 +242,9 @@ def main(
                 _log("info", f"Found {len(regions_to_use)} regions")
             if regions_need_expansion:
                 for p in regions:
-                    if core.has_glob(p) and not core.match_names(regions_to_use, p):
+                    if utils.has_glob(p) and not utils.match_names(regions_to_use, p):
                         _log("warn", f"No regions match pattern '{p}'")
-                regions_to_use = core.expand_names(regions_to_use, regions)
+                regions_to_use = utils.expand_names(regions_to_use, regions)
                 _log("complete", f"Expanded region patterns to {len(regions_to_use)} regions: {', '.join(regions_to_use)}")
 
         regions_list = sorted(regions_to_use)
@@ -252,7 +252,7 @@ def main(
         # Resolve instance types (with cache)
         ipts = instance_types or []
         if ipts:
-            if any(core.has_glob(p) for p in ipts):
+            if any(utils.has_glob(p) for p in ipts):
                 all_types: list[str] | None = None
                 if not no_cache:
                     all_types = cache.load_cache("all_instance_types", ttl_seconds=cache.INSTANCE_TTL_SECONDS)
@@ -266,9 +266,9 @@ def main(
                         cache.save_cache("all_instance_types", all_types, ttl_seconds=cache.INSTANCE_TTL_SECONDS)
                     _log("info", f"Found {len(all_types)} instance types")
                 for p in ipts:
-                    if core.has_glob(p) and not core.match_names(all_types, p):
+                    if utils.has_glob(p) and not utils.match_names(all_types, p):
                         _log("warn", f"No instance types match pattern '{p}'")
-                ipts = core.expand_names(all_types, ipts)
+                ipts = utils.expand_names(all_types, ipts)
                 _log("complete", f"Expanded instance type patterns to {len(ipts)} types: {', '.join(ipts)}")
             _log("query", f"Using {len(ipts)} specified instance types")
             if mapped_archs:

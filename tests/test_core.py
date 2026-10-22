@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 from unittest.mock import MagicMock, patch
 
-from ec2_spot_query import core
+from ec2_spot_query import core, utils
 
 
 def _make_spot_record(
@@ -801,64 +801,64 @@ def test_progress_callback_records_offset(mock_ec2):
 
 def test_map_architectures_none():
     """None input means no architecture filter."""
-    assert core.map_architectures(None) is None
+    assert utils.map_architectures(None) is None
 
 
 def test_map_architectures_empty_input():
     """Empty list / empty string input means no architecture filter."""
-    assert core.map_architectures([]) is None
-    assert core.map_architectures("") is None
-    assert core.map_architectures(["  ", ""]) is None
+    assert utils.map_architectures([]) is None
+    assert utils.map_architectures("") is None
+    assert utils.map_architectures(["  ", ""]) is None
 
 
 def test_map_architectures_x86_aliases():
     """All x86-family aliases map to x86_64."""
     for alias in ("x86", "x86_64", "intel", "amd"):
-        assert core.map_architectures(alias) == ["x86_64"]
+        assert utils.map_architectures(alias) == ["x86_64"]
 
 
 def test_map_architectures_arm_aliases():
     """All arm-family aliases map to arm64."""
     for alias in ("arm", "arm64", "graviton", "aarch64"):
-        assert core.map_architectures(alias) == ["arm64"]
+        assert utils.map_architectures(alias) == ["arm64"]
 
 
 def test_map_architectures_mac_expands():
     """mac expands to both mac architecture values."""
-    assert core.map_architectures("mac") == ["arm64_mac", "x86_64_mac"]
+    assert utils.map_architectures("mac") == ["arm64_mac", "x86_64_mac"]
 
 
 def test_map_architectures_case_insensitive():
     """Input tokens are matched case-insensitively."""
-    assert core.map_architectures("ARM") == ["arm64"]
-    assert core.map_architectures("Graviton") == ["arm64"]
-    assert core.map_architectures(["X86", "ARM"]) == ["x86_64", "arm64"]
+    assert utils.map_architectures("ARM") == ["arm64"]
+    assert utils.map_architectures("Graviton") == ["arm64"]
+    assert utils.map_architectures(["X86", "ARM"]) == ["x86_64", "arm64"]
 
 
 def test_map_architectures_official_passthrough():
     """Official AWS values pass through unchanged."""
-    assert core.map_architectures("riscv64") == ["riscv64"]
-    assert core.map_architectures("x86_64_mac") == ["x86_64_mac"]
-    assert core.map_architectures("arm64_mac") == ["arm64_mac"]
+    assert utils.map_architectures("riscv64") == ["riscv64"]
+    assert utils.map_architectures("x86_64_mac") == ["x86_64_mac"]
+    assert utils.map_architectures("arm64_mac") == ["arm64_mac"]
 
 
 def test_map_architectures_deduplicates():
     """Equivalent aliases collapse to one value, preserving first-seen order."""
-    assert core.map_architectures(["arm", "graviton", "aarch64"]) == ["arm64"]
-    assert core.map_architectures(["x86", "arm", "intel"]) == ["x86_64", "arm64"]
+    assert utils.map_architectures(["arm", "graviton", "aarch64"]) == ["arm64"]
+    assert utils.map_architectures(["x86", "arm", "intel"]) == ["x86_64", "arm64"]
 
 
 def test_map_architectures_strips_whitespace():
     """Surrounding whitespace on tokens is ignored."""
-    assert core.map_architectures(["  arm  "]) == ["arm64"]
+    assert utils.map_architectures(["  arm  "]) == ["arm64"]
 
 
 def test_map_architectures_unknown_raises():
     """Unknown tokens raise ValueError."""
     with pytest.raises(ValueError, match="Unknown architecture"):
-        core.map_architectures("sparc")
+        utils.map_architectures("sparc")
     with pytest.raises(ValueError, match="Unknown architecture"):
-        core.map_architectures(["arm", "bogus"])
+        utils.map_architectures(["arm", "bogus"])
 
 
 def test_resolve_arch_filter_passed_to_api():
@@ -1084,86 +1084,86 @@ _TYPES = ["t3.micro", "t3.large", "m7g.xlarge", "m7g.2xlarge", "m7i.xlarge", "in
 
 def test_has_glob_true():
     """Patterns containing *, ? or [ are glob patterns."""
-    assert core.has_glob("eu-*")
-    assert core.has_glob("inf2.*")
-    assert core.has_glob("us-ea?t-1")
-    assert core.has_glob("m7[gr].large")
-    assert core.has_glob("a[!b]c")
+    assert utils.has_glob("eu-*")
+    assert utils.has_glob("inf2.*")
+    assert utils.has_glob("us-ea?t-1")
+    assert utils.has_glob("m7[gr].large")
+    assert utils.has_glob("a[!b]c")
 
 
 def test_has_glob_false():
     """Plain names without glob characters are not glob patterns."""
-    assert not core.has_glob("t3.micro")
-    assert not core.has_glob("eu-west-1")
-    assert not core.has_glob("")
+    assert not utils.has_glob("t3.micro")
+    assert not utils.has_glob("eu-west-1")
+    assert not utils.has_glob("")
 
 
 def test_match_names_star():
     """Star pattern matches all names with the prefix."""
-    assert core.match_names(_REGIONS, "eu-*") == ["eu-central-1", "eu-north-1", "eu-west-1", "eu-west-2"]
+    assert utils.match_names(_REGIONS, "eu-*") == ["eu-central-1", "eu-north-1", "eu-west-1", "eu-west-2"]
 
 
 def test_match_names_question_mark():
     """Question mark matches exactly one character."""
-    assert core.match_names(_TYPES, "t3.mi?ro") == ["t3.micro"]
-    assert core.match_names(_TYPES, "t3.mi?o") == []
+    assert utils.match_names(_TYPES, "t3.mi?ro") == ["t3.micro"]
+    assert utils.match_names(_TYPES, "t3.mi?o") == []
 
 
 def test_match_names_bracket():
     """Bracket expression matches any character in the set (and negation)."""
-    assert core.match_names(_TYPES, "m7[gi].xlarge") == ["m7g.xlarge", "m7i.xlarge"]
-    assert core.match_names(_TYPES, "m7[!i].xlarge") == ["m7g.xlarge"]
+    assert utils.match_names(_TYPES, "m7[gi].xlarge") == ["m7g.xlarge", "m7i.xlarge"]
+    assert utils.match_names(_TYPES, "m7[!i].xlarge") == ["m7g.xlarge"]
 
 
 def test_match_names_no_match():
     """A pattern matching nothing returns an empty list."""
-    assert core.match_names(_REGIONS, "zzz-*") == []
+    assert utils.match_names(_REGIONS, "zzz-*") == []
 
 
 def test_match_names_sorted():
     """Results are returned sorted regardless of input order."""
     shuffled = list(reversed(_TYPES))
-    assert core.match_names(shuffled, "inf2.*") == ["inf2.2xlarge", "inf2.48xlarge", "inf2.xlarge"]
+    assert utils.match_names(shuffled, "inf2.*") == ["inf2.2xlarge", "inf2.48xlarge", "inf2.xlarge"]
 
 
 def test_match_names_case_sensitive():
     """Matching is case-sensitive: uppercase patterns match nothing."""
-    assert core.match_names(_TYPES, "INF2.*") == []
-    assert core.match_names(_TYPES, "Inf2.*") == []
+    assert utils.match_names(_TYPES, "INF2.*") == []
+    assert utils.match_names(_TYPES, "Inf2.*") == []
 
 
 def test_expand_names_literal_passthrough():
     """Patterns without glob characters pass through as-is, even if absent from names."""
-    assert core.expand_names(_REGIONS, ["us-east-1"]) == ["us-east-1"]
-    assert core.expand_names(_REGIONS, ["us-east-1", "us-iso-east-1"]) == ["us-east-1", "us-iso-east-1"]
+    assert utils.expand_names(_REGIONS, ["us-east-1"]) == ["us-east-1"]
+    assert utils.expand_names(_REGIONS, ["us-east-1", "us-iso-east-1"]) == ["us-east-1", "us-iso-east-1"]
 
 
 def test_expand_names_glob_only():
     """Glob patterns expand against the name list."""
-    assert core.expand_names(_REGIONS, ["eu-*"]) == ["eu-central-1", "eu-north-1", "eu-west-1", "eu-west-2"]
+    assert utils.expand_names(_REGIONS, ["eu-*"]) == ["eu-central-1", "eu-north-1", "eu-west-1", "eu-west-2"]
 
 
 def test_expand_names_mixed_literals_and_globs():
     """Literals and globs are unioned."""
-    result = core.expand_names(_TYPES, ["t3.micro", "inf2.*"])
+    result = utils.expand_names(_TYPES, ["t3.micro", "inf2.*"])
     assert result == ["inf2.2xlarge", "inf2.48xlarge", "inf2.xlarge", "t3.micro"]
 
 
 def test_expand_names_deduplicates():
     """Overlapping patterns produce no duplicates."""
-    result = core.expand_names(_TYPES, ["inf2.*", "inf2.xlarge", "t3.*", "t3.micro"])
+    result = utils.expand_names(_TYPES, ["inf2.*", "inf2.xlarge", "t3.*", "t3.micro"])
     assert result == ["inf2.2xlarge", "inf2.48xlarge", "inf2.xlarge", "t3.large", "t3.micro"]
     assert len(result) == len(set(result))
 
 
 def test_expand_names_no_match():
     """All-glob input with no matches returns an empty list."""
-    assert core.expand_names(_REGIONS, ["zzz-*"]) == []
+    assert utils.expand_names(_REGIONS, ["zzz-*"]) == []
 
 
 def test_expand_names_mixed_no_match_keeps_literals():
     """A glob with no matches does not discard literal patterns."""
-    assert core.expand_names(_REGIONS, ["zzz-*", "eu-west-1"]) == ["eu-west-1"]
+    assert utils.expand_names(_REGIONS, ["zzz-*", "eu-west-1"]) == ["eu-west-1"]
 
 
 def test_list_instance_types(mock_ec2):
