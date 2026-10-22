@@ -5,12 +5,21 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from ec2_spot_query.cli import app
 from unittest.mock import MagicMock, patch
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _mock_placement_scores(mocker):
+    """Keep the default-on placement-score path offline and deterministic."""
+    return mocker.patch(
+        "ec2_spot_query.core.get_spot_placement_scores", return_value={}
+    )
 
 
 def _spot_records() -> list[dict]:
@@ -205,7 +214,7 @@ class TestArchFilter:
         cache_file = tmp_path / ".cache" / "ec2-spot-cache.json"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps({
-            "resolve:vcpu0-64:ram0.5-128.0:gpu0-8:storage0.0-256.0:archarm64:regionsus-east-1": {
+            "resolve:vcpu0-64:ram0.5-128.0:gpu0-0:storage0.0-256.0:archarm64:regionsus-east-1": {
                 "data": ["c6g.large"],
                 "expires_at": 9999999999,
             }

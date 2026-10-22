@@ -45,7 +45,7 @@ ec2-spot-query --min-vcpu 1 --max-vcpu 4 --min-ram 32 --max-ram 128
 | `-r, --region` | Limit to specific regions | `-r us-west-2,eu-west-1` |
 | `--sort-by` | Sort metric | `--sort-by 1m_mean` |
 | `--limit` | Rows to display | `--limit 20` |
-| `--per-az` | Per-AZ breakdown | `--per-az` |
+| `--per-az` | Per-AZ breakdown (default on) | `--per-az` |
 | `-p, --progress` | Progress spinner | `-p` |
 | `--no-cache` | Skip cache entirely | `--no-cache` |
 
