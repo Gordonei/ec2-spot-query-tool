@@ -509,6 +509,28 @@ def test_negative_max_ram_gb_triggers_warning(mock_ec2):
     mock_logger.warning.assert_any_call("min_ram_gb is negative (%f); treated as unbounded", -1.0)
 
 
+class TestValidateRange:
+    """Tests for utils.validate_range constraint helper."""
+
+    def test_valid_range_no_error(self):
+        """No error when max >= min."""
+        utils.validate_range("vcpu", 2, 16)  # should not raise
+
+    def test_equal_bounds_no_error(self):
+        """No error when max == min (single allowed value)."""
+        utils.validate_range("gpu", 0, 0)  # should not raise
+
+    def test_max_less_than_min_raises(self):
+        """ValueError raised when max < min."""
+        with pytest.raises(ValueError, match="max_vcpu.*min_vcpu"):
+            utils.validate_range("vcpu", 8, 4)
+
+    def test_error_message_includes_values(self):
+        """Error message names the constraint and both values."""
+        with pytest.raises(ValueError, match=r"max_ram_gb \(32\).*min_ram_gb \(64\)"):
+            utils.validate_range("ram_gb", 64, 32)
+
+
 def test_fetch_region_prices_consumes_multiple_pages(mock_ec2):
     """Multi-page responses are fully consumed."""
     mock_ec2.describe_spot_price_history.side_effect = [

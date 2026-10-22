@@ -128,14 +128,10 @@ def resolve_instance_types(
         logger.warning("max_instance_storage_gb is negative (%f); treated as unbounded", max_instance_storage_gb)
 
     # Validate min <= max constraints
-    if max_vcpu < min_vcpu:
-        raise ValueError(f"max_vcpu ({max_vcpu}) cannot be less than min_vcpu ({min_vcpu})")
-    if max_ram_gb < min_ram_gb:
-        raise ValueError(f"max_ram_gb ({max_ram_gb}) cannot be less than min_ram_gb ({min_ram_gb})")
-    if max_gpu < min_gpu:
-        raise ValueError(f"max_gpu ({max_gpu}) cannot be less than min_gpu ({min_gpu})")
-    if max_instance_storage_gb < min_instance_storage_gb:
-        raise ValueError(f"max_instance_storage_gb ({max_instance_storage_gb}) cannot be less than min_instance_storage_gb ({min_instance_storage_gb})")
+    utils.validate_range("vcpu", min_vcpu, max_vcpu)
+    utils.validate_range("ram_gb", min_ram_gb, max_ram_gb)
+    utils.validate_range("gpu", min_gpu, max_gpu)
+    utils.validate_range("instance_storage_gb", min_instance_storage_gb, max_instance_storage_gb)
 
     if architectures:
         for arch in architectures:
