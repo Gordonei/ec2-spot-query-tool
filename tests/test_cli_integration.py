@@ -344,7 +344,7 @@ class TestGlobExpansion:
         assert "zzz.*" in combined
 
     def test_region_glob_uses_cached_region_list(self, mocker, tmp_path):
-        """A cached region list serves glob expansion without calling list_regions."""
+        """A cached region list serves glob expansion without hitting the AWS API."""
         cache_file = tmp_path / ".cache" / "ec2-spot-cache.json"
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(json.dumps({
@@ -353,7 +353,6 @@ class TestGlobExpansion:
                 "expires_at": 9999999999,
             }
         }), encoding="utf-8")
-        mock_list = mocker.patch("ec2_spot_query.core.list_regions")
         mock_fetch = mocker.patch(
             "ec2_spot_query.core.fetch_spot_prices", return_value=_spot_records()
         )
@@ -365,7 +364,6 @@ class TestGlobExpansion:
             )
 
         assert result.exit_code == 0, result.stdout
-        mock_list.assert_not_called()
         assert mock_fetch.call_args.kwargs["regions"] == ["eu-central-1", "eu-west-1"]
 
     def test_instance_glob_uses_cached_catalog(self, mocker, tmp_path):

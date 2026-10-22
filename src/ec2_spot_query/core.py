@@ -214,14 +214,32 @@ def resolve_instance_types(
         return list(set(result))
 
 
-def list_regions() -> list[str]:
+def list_regions(
+    no_cache: bool = False,
+    no_cache_lookup: bool = False,
+) -> list[str]:
     """Return all AWS region names.
 
     ``describe_regions`` is a global call — the result is identical from
     any region, so the shared default-region client is used.
+
+    The result is cached on disk for 30 days (``REGIONS_TTL_SECONDS``) since
+    the region list rarely changes.  Pass *no_cache* to bypass both the cache
+    read and write, or *no_cache_lookup* to skip the read but still refresh
+    the cache.
     """
+    cache_key = "regions"
+    if not no_cache and not no_cache_lookup:
+        cached = cache.load_cache(cache_key, ttl_seconds=cache.REGIONS_TTL_SECONDS)
+        if cached:
+            return cached
+
     resp = _DEFAULT_CLIENT.describe_regions()
-    return [r["RegionName"] for r in resp.get("Regions", [])]
+    regions = [r["RegionName"] for r in resp.get("Regions", [])]
+
+    if regions and not no_cache:
+        cache.save_cache(cache_key, regions, ttl_seconds=cache.REGIONS_TTL_SECONDS)
+    return regions
 
 
 def list_instance_types(regions: list[str] | None = None) -> list[str]:

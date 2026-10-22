@@ -5,6 +5,7 @@ from __future__ import annotations
 pytest_plugins = ("tests.test_utils",)
 
 import datetime as dt
+import json
 
 import botocore.exceptions
 import pandas as pd
@@ -264,12 +265,68 @@ def test_resolve_instance_types_filters_instances():
     assert "t2.micro" not in result
 
 
-def test_list_regions(mock_ec2):
+def test_list_regions(mock_ec2, tmp_path):
     """list_regions returns region names from describe_regions."""
     mock_ec2.describe_regions.return_value = {
         "Regions": [{"RegionName": "us-east-1"}, {"RegionName": "eu-west-1"}]
     }
-    assert core.list_regions() == ["us-east-1", "eu-west-1"]
+    cache_file = tmp_path / "ec2-spot-cache.json"
+    with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+        assert core.list_regions() == ["us-east-1", "eu-west-1"]
+
+
+def test_list_regions_cache_hit_skips_api(mock_ec2, tmp_path):
+    """A valid cached region list is returned without calling describe_regions."""
+    cache_file = tmp_path / "ec2-spot-cache.json"
+    cache_file.write_text(json.dumps({
+        "regions": {"data": ["us-east-1", "eu-west-1"], "expires_at": 9999999999},
+    }), encoding="utf-8")
+    with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+        assert core.list_regions() == ["us-east-1", "eu-west-1"]
+    mock_ec2.describe_regions.assert_not_called()
+
+
+def test_list_regions_cache_written_on_miss(mock_ec2, tmp_path):
+    """A cache miss populates the region cache on disk."""
+    mock_ec2.describe_regions.return_value = {
+        "Regions": [{"RegionName": "us-east-1"}, {"RegionName": "eu-west-1"}]
+    }
+    cache_file = tmp_path / "ec2-spot-cache.json"
+    with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+        core.list_regions()
+    content = json.loads(cache_file.read_text(encoding="utf-8"))
+    assert content["regions"]["data"] == ["us-east-1", "eu-west-1"]
+
+
+def test_list_regions_no_cache_bypasses_read_and_write(mock_ec2, tmp_path):
+    """no_cache=True bypasses both the cache read and the write."""
+    cache_file = tmp_path / "ec2-spot-cache.json"
+    cache_file.write_text(json.dumps({
+        "regions": {"data": ["cached-region"], "expires_at": 9999999999},
+    }), encoding="utf-8")
+    mock_ec2.describe_regions.return_value = {
+        "Regions": [{"RegionName": "us-east-1"}]
+    }
+    with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+        assert core.list_regions(no_cache=True) == ["us-east-1"]
+    # Cache file unchanged (still the stale value, never overwritten).
+    content = json.loads(cache_file.read_text(encoding="utf-8"))
+    assert content["regions"]["data"] == ["cached-region"]
+
+
+def test_list_regions_no_cache_lookup_skips_read_but_writes(mock_ec2, tmp_path):
+    """no_cache_lookup=True skips the cache read but still refreshes it."""
+    cache_file = tmp_path / "ec2-spot-cache.json"
+    cache_file.write_text(json.dumps({
+        "regions": {"data": ["stale-region"], "expires_at": 9999999999},
+    }), encoding="utf-8")
+    mock_ec2.describe_regions.return_value = {
+        "Regions": [{"RegionName": "us-east-1"}, {"RegionName": "eu-west-1"}]
+    }
+    with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+        assert core.list_regions(no_cache_lookup=True) == ["us-east-1", "eu-west-1"]
+    content = json.loads(cache_file.read_text(encoding="utf-8"))
+    assert content["regions"]["data"] == ["us-east-1", "eu-west-1"]
 
 
 def test_aggregate_by_region_selects_best_az():
