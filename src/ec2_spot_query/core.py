@@ -501,7 +501,12 @@ def fetch_spot_prices(
     return all_records
 
 
-def _compute_group_metrics(grp_sorted: pd.DataFrame, itype: str, region_az: str) -> dict[str, Any]:
+def _compute_group_metrics(
+    grp_sorted: pd.DataFrame,
+    itype: str,
+    region_az: str,
+    max_window: str = "1w",
+) -> dict[str, Any]:
     """Compute metric row for one (instance_type, region_az) group."""
     last_price = float(grp_sorted["SpotPrice"].iloc[-1])
     row: dict[str, Any] = {
@@ -512,7 +517,11 @@ def _compute_group_metrics(grp_sorted: pd.DataFrame, itype: str, region_az: str)
         "placement_score": None,
     }
 
-    for wname, wdelta in _WINDOWS.items():
+    window_keys = list(_WINDOWS.keys())
+    max_idx = window_keys.index(max_window)
+    active_windows = dict(list(_WINDOWS.items())[:max_idx + 1])
+
+    for wname, wdelta in active_windows.items():
         if len(grp_sorted) < 2:
             mean_val = float(grp_sorted["SpotPrice"].mean())
             row[f"{wname}_mean"] = mean_val
@@ -549,18 +558,26 @@ def _compute_group_metrics(grp_sorted: pd.DataFrame, itype: str, region_az: str)
 def compute_metrics(
     raw_data: list[dict[str, Any]],
     sort_by: str = "1d_mean",
+    max_window: str = "1w",
 ) -> pd.DataFrame:
     """Load raw spot-price data into a DataFrame and compute metrics.
 
     For every (InstanceType, AZ) group, mean and standard deviation are
-    computed for each of the 6 time windows (1 h … 1 m).  Flat price
-    histories get a volatility of ``0.0`` instead of ``NaN``.
+    computed for each time window up to and including *max_window*.
+    Flat price histories get a volatility of ``0.0`` instead of ``NaN``.
 
     The returned DataFrame includes a ``region`` column alongside the
     existing ``region_az`` column.
+
+    Args:
+        max_window: Maximum time window to compute (e.g. "1w", "1m").
+            Only windows up to and including this value are included.
     """
+    window_keys = list(_WINDOWS.keys())
+    if max_window not in _WINDOWS:
+        raise ValueError(f"Unknown time window {max_window!r}. Valid values: {', '.join(window_keys)}")
     if not raw_data:
-        return _empty_result()
+        return _empty_result(max_window)
 
     df = pd.DataFrame(raw_data)
     df["SpotPrice"] = pd.to_numeric(df["SpotPrice"], errors="coerce")
@@ -573,7 +590,7 @@ def compute_metrics(
     def _row_generator():
         for (itype, group_key), grp in df.groupby(["InstanceType", "region_az"]):
             grp_sorted = grp.set_index("Timestamp").sort_index()
-            yield _compute_group_metrics(grp_sorted, itype, group_key)
+            yield _compute_group_metrics(grp_sorted, itype, group_key, max_window)
 
     result = pd.DataFrame(list(_row_generator()))
 
@@ -584,15 +601,17 @@ def compute_metrics(
     return result
 
 
-def _empty_result() -> pd.DataFrame:
+def _empty_result(max_window: str = "1w") -> pd.DataFrame:
     """Return an empty DataFrame with the expected column schema."""
-    ncols = [
-        "region_az", "region", "instance_type", "current_price",
-        "1h_mean", "1h_vol", "6h_mean", "6h_vol",
-        "12h_mean", "12h_vol", "1d_mean", "1d_vol",
-        "1w_mean", "1w_vol", "1m_mean", "1m_vol",
-        "placement_score",
-    ]
+    window_keys = list(_WINDOWS.keys())
+    if max_window not in _WINDOWS:
+        raise ValueError(f"Unknown time window {max_window!r}. Valid values: {', '.join(window_keys)}")
+    max_idx = window_keys.index(max_window)
+    active_keys = window_keys[:max_idx + 1]
+    ncols = ["region_az", "region", "instance_type", "current_price"]
+    for k in active_keys:
+        ncols.extend([f"{k}_mean", f"{k}_vol"])
+    ncols.append("placement_score")
     return pd.DataFrame(columns=ncols)
 
 

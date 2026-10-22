@@ -40,8 +40,23 @@ def test_compute_metrics_empty_input(raw_spot_data):
 
 
 def test_compute_metrics_has_correct_columns():
-    """Result DataFrame has all expected column names."""
+    """Result DataFrame has all expected column names for default max_window (1w)."""
     result = core.compute_metrics([])
+    expected_cols = [
+        "region_az", "region", "instance_type", "current_price",
+        "1h_mean", "1h_vol",
+        "6h_mean", "6h_vol",
+        "12h_mean", "12h_vol",
+        "1d_mean", "1d_vol",
+        "1w_mean", "1w_vol",
+        "placement_score",
+    ]
+    assert list(result.columns) == expected_cols
+
+
+def test_compute_metrics_has_all_columns_with_1m():
+    """Result DataFrame has all 6 time window columns when max_window=1m."""
+    result = core.compute_metrics([], max_window="1m")
     expected_cols = [
         "region_az", "region", "instance_type", "current_price",
         "1h_mean", "1h_vol",
@@ -75,12 +90,73 @@ def test_compute_metrics_sort_by_1d_mean(raw_spot_data):
 
 
 def test_compute_metrics_multiple_windows_all_present(raw_spot_data):
-    """All 6 time windows produce exactly 2 columns (mean + vol) each."""
-    df = core.compute_metrics(raw_spot_data)
+    """All 6 time windows produce exactly 2 columns (mean + vol) each when max_window=1m."""
+    df = core.compute_metrics(raw_spot_data, max_window="1m")
     windows = ["1h", "6h", "12h", "1d", "1w", "1m"]
     for w in windows:
         assert f"{w}_mean" in df.columns, f"Missing {w}_mean"
         assert f"{w}_vol" in df.columns, f"Missing {w}_vol"
+
+
+def test_compute_metrics_max_window_default(raw_spot_data):
+    """Default max_window is 1w, so 1m columns should not be present."""
+    df = core.compute_metrics(raw_spot_data)
+    assert "1w_mean" in df.columns
+    assert "1m_mean" not in df.columns
+    assert "1w_vol" in df.columns
+    assert "1m_vol" not in df.columns
+
+
+def test_compute_metrics_max_window_1m(raw_spot_data):
+    """Explicit max_window=1m includes all 6 windows."""
+    df = core.compute_metrics(raw_spot_data, max_window="1m")
+    for w in ["1h", "6h", "12h", "1d", "1w", "1m"]:
+        assert f"{w}_mean" in df.columns, f"Missing {w}_mean"
+        assert f"{w}_vol" in df.columns, f"Missing {w}_vol"
+
+
+def test_compute_metrics_max_window_6h(raw_spot_data):
+    """max_window=6h includes only 1h and 6h."""
+    df = core.compute_metrics(raw_spot_data, max_window="6h")
+    assert "1h_mean" in df.columns
+    assert "6h_mean" in df.columns
+    assert "12h_mean" not in df.columns
+    assert "1d_mean" not in df.columns
+    assert "1w_mean" not in df.columns
+    assert "1m_mean" not in df.columns
+
+
+def test_compute_metrics_max_window_1d(raw_spot_data):
+    """max_window=1d includes 1h, 6h, 12h, 1d."""
+    df = core.compute_metrics(raw_spot_data, max_window="1d")
+    assert "1h_mean" in df.columns
+    assert "12h_mean" in df.columns
+    assert "1d_mean" in df.columns
+    assert "1w_mean" not in df.columns
+    assert "1m_mean" not in df.columns
+
+
+def test_compute_metrics_invalid_max_window(raw_spot_data):
+    """Unknown max_window raises ValueError."""
+    with pytest.raises(ValueError, match="Unknown time window"):
+        core.compute_metrics(raw_spot_data, max_window="2d")
+
+
+def test_compute_metrics_empty_input_max_window_6h():
+    """_empty_result respects max_window=6h."""
+    df = core.compute_metrics([], max_window="6h")
+    assert "1h_mean" in df.columns
+    assert "6h_mean" in df.columns
+    assert "12h_mean" not in df.columns
+    assert df.empty
+
+
+def test_compute_metrics_empty_input_max_window_1m():
+    """_empty_result respects max_window=1m (all windows)."""
+    df = core.compute_metrics([], max_window="1m")
+    assert "1m_mean" in df.columns
+    assert "1w_mean" in df.columns
+    assert df.empty
 
 
 def test_compute_metrics_grouped_by_az(raw_spot_data):

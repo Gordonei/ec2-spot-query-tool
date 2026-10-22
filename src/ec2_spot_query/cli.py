@@ -23,6 +23,16 @@ from rich.progress import (
 from ec2_spot_query import cache, core
 
 
+_DAYS_FOR_WINDOW: dict[str, int] = {
+    "1h": 1,
+    "6h": 1,
+    "12h": 1,
+    "1d": 1,
+    "1w": 7,
+    "1m": 30,
+}
+
+
 app = typer.Typer(
     name="ec2-spot-query",
     help="Analyse and rank AWS Spot Market instances across multiple time horizons.",
@@ -87,7 +97,7 @@ def _make_progress_handler(console: Console, use_progress: bool) -> Callable[[st
 # Rendering
 # ---------------------------------------------------------------------------
 
-def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int = -1, per_az: bool = False, with_score: bool = False) -> None:
+def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int = -1, per_az: bool = False, with_score: bool = False, max_window: str = "1w") -> None:
     """Render result DataFrame as a rich table to stdout."""
     console = Console()
 
@@ -102,42 +112,42 @@ def render_table(result_df: pd.DataFrame, sort_by: str = "1d_mean", limit: int =
     table.add_column("Region / AZ" if per_az else "Region")
     table.add_column("Instance Type")
     table.add_column("Current Price")
-    table.add_column("1h Avg")
-    table.add_column("1h Vol")
-    table.add_column("6h Avg")
-    table.add_column("6h Vol")
-    table.add_column("12h Avg")
-    table.add_column("12h Vol")
-    table.add_column("1d Avg")
-    table.add_column("1d Vol")
-    table.add_column("1w Avg")
-    table.add_column("1w Vol")
-    table.add_column("1m Avg")
-    table.add_column("1m Vol")
+
+    _WINDOW_LABELS = {
+        "1h": "1h Avg",
+        "6h": "6h Avg",
+        "12h": "12h Avg",
+        "1d": "1d Avg",
+        "1w": "1w Avg",
+        "1m": "1m Avg",
+    }
+
+    window_keys = list(_DAYS_FOR_WINDOW.keys())
+    if max_window not in _DAYS_FOR_WINDOW:
+        max_window = "1w"
+    max_idx = window_keys.index(max_window)
+    active_windows = window_keys[:max_idx + 1]
+
+    for w in active_windows:
+        table.add_column(f"{_WINDOW_LABELS[w]}")
+        table.add_column(f"{w} Vol")
+
     if with_score:
         table.add_column("Score")
 
     for _, row in result_df.iterrows():
         score_val = row.get("placement_score")
         score_str = str(score_val) if score_val is not None else "N/A"
-        table.add_row(
+        cells = [
             str(row["region_az"] if per_az else row["region"]),
             str(row["instance_type"]),
             f"${row['current_price']:.3f}",
-            f"{row['1h_mean']:.3f}",
-            f"{row['1h_vol']:.4f}",
-            f"{row['6h_mean']:.3f}",
-            f"{row['6h_vol']:.4f}",
-            f"{row['12h_mean']:.3f}",
-            f"{row['12h_vol']:.4f}",
-            f"{row['1d_mean']:.3f}",
-            f"{row['1d_vol']:.4f}",
-            f"{row['1w_mean']:.3f}",
-            f"{row['1w_vol']:.4f}",
-            f"{row['1m_mean']:.3f}",
-            f"{row['1m_vol']:.4f}",
-            score_str,
-        )
+        ]
+        for w in active_windows:
+            cells.append(f"{row[f'{w}_mean']:.3f}")
+            cells.append(f"{row[f'{w}_vol']:.4f}")
+        cells.append(score_str)
+        table.add_row(*cells)
 
     console.print(table)
 
@@ -172,6 +182,7 @@ def main(
     placement_score: bool = typer.Option(False, "--placement-score", help="Query AWS Spot Placement Scores for capacity availability"),
     min_placement_score: int = typer.Option(5, "--min-placement-score", help="Minimum placement score threshold (1-10, default: 5)"),
     target_capacity: int = typer.Option(1, "--target-capacity", help="Target capacity for placement score queries (default: 1)"),
+    max_days: str = typer.Option("1w", "--max-days", help="Maximum time window to display (1h, 6h, 12h, 1d, 1w, 1m)"),
 ) -> None:
     """Analyse and rank AWS EC2 Spot instance prices."""
     if ctx.invoked_subcommand is not None:
@@ -359,7 +370,7 @@ def main(
                     batch = core.fetch_spot_prices(
                         [itype],
                         regions=regions_to_use,
-                        days=30,
+                        days=_DAYS_FOR_WINDOW.get(max_days, 7),
                         progress_callback=_wrap_progress_callback,
                         product_description=product_description,
                         records_offset=len(raw),
@@ -388,8 +399,8 @@ def main(
             _log("complete", f"Retrieved placement scores for {scored_regions} region(s), {scored_types} instance type(s)")
 
         # Compute metrics
-        _log("query", f"Computing metrics for {len(raw):,} price points across 6 time windows")
-        result = core.compute_metrics(raw, sort_by=sort_by)
+        _log("query", f"Computing metrics for {len(raw):,} price points across time windows up to {max_days}")
+        result = core.compute_metrics(raw, sort_by=sort_by, max_window=max_days)
 
         # Inject placement scores and filter (before aggregation for per-region output)
         if placement_scores:
@@ -429,7 +440,7 @@ def main(
 
         # Render
         _log("info", f"Rendering {len(result)} rows")
-        render_table(result, sort_by=sort_by, limit=limit, per_az=per_az, with_score=placement_score)
+        render_table(result, sort_by=sort_by, limit=limit, per_az=per_az, with_score=placement_score, max_window=max_days)
 
     except Exception as e:
         _log("error", str(e))
