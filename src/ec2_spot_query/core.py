@@ -62,10 +62,10 @@ def _filter_instance(
     else:
         storage_gb = 0
     return (
-        vcpus >= min_vcpu and vcpus <= max_vcpu and
-        mem_gb >= min_ram_gb and mem_gb <= max_ram_gb and
-        gpus >= min_gpu and gpus <= max_gpu and
-        storage_gb >= min_instance_storage_gb and storage_gb <= max_instance_storage_gb
+        min_vcpu <= vcpus <= max_vcpu and
+        min_ram_gb <= mem_gb <= max_ram_gb and
+        min_gpu <= gpus <= max_gpu and
+        min_instance_storage_gb <= storage_gb <= max_instance_storage_gb
     )
 
 
