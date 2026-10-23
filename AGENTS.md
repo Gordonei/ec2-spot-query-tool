@@ -5,9 +5,10 @@
 Dependency management is `uv` (Python >= 3.12; dev deps in `[dependency-groups]`):
 
 ```bash
-uv sync                  # install deps (incl. pytest, pytest-mock)
+uv sync                  # install deps (incl. pytest, pytest-mock, ruff)
 uv run python -m pytest  # run tests — NOT `uv run pytest` (see below)
 uv run python -m pytest tests/test_core.py::test_compute_metrics_empty_input  # single test
+uv run ruff check .      # lint (add --fix to auto-sort imports / drop unused)
 uv run ec2-spot-query --help
 ```
 
@@ -22,12 +23,12 @@ Make changes in this loop:
 2. Write tests covering the intended behavior: happy cases and the obvious unhappy paths (invalid input, empty results, error conditions).
 3. Implement until the tests pass.
 
-Run `uv run python -m pytest` (full suite, fast — ~1s) after each change.
+Run `uv run python -m pytest` (full suite, fast — ~1s) and `uv run ruff check .` after each change.
 
 ## Style
 
 - PEP 8 strictly.
-- No lint/typecheck tooling is configured in this repo; PEP 8 compliance is the bar.
+- Lint with `ruff` (config in `pyproject.toml`): rules `E`, `F`, `W`, `I`; `E501` (line-too-long) is not enforced yet. Run `uv run ruff check .` after every change; `--fix` auto-sorts imports and removes unused ones.
 - Existing code uses `from __future__ import annotations`, type hints throughout, and `X | None` unions — match that.
 
 ## Git

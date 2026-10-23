@@ -2,22 +2,16 @@
 
 from __future__ import annotations
 
-pytest_plugins = ("tests.test_utils",)
-
-import datetime as dt
 import io
-import json
-import time
-from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 from rich.console import Console
 from typer.testing import CliRunner
 
 from ec2_spot_query import cache, cli, core
+
+pytest_plugins = ("tests.test_utils",)
 
 runner = CliRunner()
 

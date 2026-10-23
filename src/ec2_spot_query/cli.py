@@ -22,7 +22,6 @@ from rich.progress import (
 
 from ec2_spot_query import cache, core, utils
 
-
 _DAYS_FOR_WINDOW: dict[str, int] = {
     "1h": 1,
     "6h": 1,

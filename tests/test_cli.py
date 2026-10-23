@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-pytest_plugins = ("tests.test_utils",)
-
 import io
 import re
+from unittest.mock import patch
 
 import pandas as pd
-import pytest
 from rich.console import Console
 from typer.testing import CliRunner
-from unittest.mock import patch
 
 from ec2_spot_query import cli
 from ec2_spot_query.cli import app
+
+pytest_plugins = ("tests.test_utils",)
 
 
 runner = CliRunner()

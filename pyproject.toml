@@ -23,5 +23,16 @@ packages = ["src/ec2_spot_query"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# PEP 8 style (E/W), pyflakes bug detection (F), and import sorting (I).
+# E501 (line-too-long) is not enforced yet; the codebase has many long
+# lines that will be wrapped incrementally.
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
 [dependency-groups]
-dev = ["pytest", "pytest-mock"]
+dev = ["pytest", "pytest-mock", "ruff"]

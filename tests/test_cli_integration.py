@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
 from ec2_spot_query import cache
 from ec2_spot_query.cli import app
-from unittest.mock import MagicMock, patch
 
 runner = CliRunner()
 
@@ -579,7 +579,7 @@ class TestErrorHandling:
         """When all regions fail with errors, the CLI shows an explicit message."""
         import logging
 
-        mock_resolve = mocker.patch(
+        mocker.patch(
             "ec2_spot_query.core.resolve_instance_types", return_value=["t3.micro"]
         )
         mocker.patch("ec2_spot_query.core.list_regions", return_value=["us-east-1", "eu-west-1"])

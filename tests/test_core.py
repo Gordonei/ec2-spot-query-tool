@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-pytest_plugins = ("tests.test_utils",)
-
 import datetime as dt
 import json
+from unittest.mock import MagicMock, patch
 
 import botocore.exceptions
 import pandas as pd
 import pytest
-from unittest.mock import MagicMock, patch
 
 from ec2_spot_query import cache, core, utils
+
+pytest_plugins = ("tests.test_utils",)
 
 
 def _make_spot_record(
@@ -534,7 +534,7 @@ def test_negative_min_vcpu_triggers_warning(mock_ec2):
     """Negative min_vcpu triggers a warning log."""
     mock_ec2.describe_instance_types.return_value = {"InstanceTypes": []}
     with patch("ec2_spot_query.core.logger") as mock_logger:
-        result = core.resolve_instance_types(
+        core.resolve_instance_types(
             instance_types=[],
             min_vcpu=-1,
             min_ram_gb=0.5,
@@ -552,7 +552,7 @@ def test_negative_max_ram_gb_triggers_warning(mock_ec2):
     """Negative max_ram_gb triggers a warning log."""
     mock_ec2.describe_instance_types.return_value = {"InstanceTypes": []}
     with patch("ec2_spot_query.core.logger") as mock_logger:
-        result = core.resolve_instance_types(
+        core.resolve_instance_types(
             instance_types=[],
             min_vcpu=0,
             min_ram_gb=-1.0,
@@ -717,7 +717,9 @@ def test_progress_callback_receives_updates(mock_ec2):
     }
 
     received: list[tuple[str, int]] = []
-    callback = lambda pair, total: received.append((pair, total))
+
+    def callback(pair, total):
+        received.append((pair, total))
 
     result = core.fetch_spot_prices(
         ["t3.micro"],
@@ -780,7 +782,9 @@ def test_progress_callback_format(mock_ec2):
     }
 
     received: list[tuple[str, int]] = []
-    callback = lambda pair, total: received.append((pair, total))
+
+    def callback(pair, total):
+        received.append((pair, total))
 
     result = core.fetch_spot_prices(
         ["t3.micro"],
@@ -814,7 +818,9 @@ def test_progress_includes_all_pairs(mock_ec2):
     }
 
     received: list[tuple[str, int]] = []
-    callback = lambda pair, total: received.append((pair, total))
+
+    def callback(pair, total):
+        received.append((pair, total))
 
     core.fetch_spot_prices(
         ["t3.micro", "t3.large"],
@@ -856,7 +862,9 @@ def test_progress_callback_records_offset(mock_ec2):
     }
 
     received: list[tuple[str, int]] = []
-    callback = lambda pair, total: received.append((pair, total))
+
+    def callback(pair, total):
+        received.append((pair, total))
 
     result = core.fetch_spot_prices(
         ["t3.micro"],
