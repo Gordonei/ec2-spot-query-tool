@@ -12,6 +12,8 @@ from typer.testing import CliRunner
 from ec2_spot_query import cache
 from ec2_spot_query.cli import app
 
+pytest_plugins = ("tests.test_utils",)
+
 runner = CliRunner()
 
 
@@ -430,7 +432,7 @@ class TestGlobExpansion:
 class TestFlags:
     """Test --progress and --debug flags."""
 
-    def test_progress_flag_in_help(self):
+    def test_progress_flag_in_help(self, wide_terminal):
         """--progress flag appears in --help output."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
@@ -446,7 +448,7 @@ class TestFlags:
         )
         assert result.exit_code == 0
 
-    def test_debug_flag_in_help(self):
+    def test_debug_flag_in_help(self, wide_terminal):
         """--debug flag appears in --help output."""
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0

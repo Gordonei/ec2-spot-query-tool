@@ -126,7 +126,7 @@ def test_render_table_without_limit(capsys):
     assert "t3.large" in output
 
 
-def test_help_flag_lists_all_options():
+def test_help_flag_lists_all_options(wide_terminal):
     """--help exits 0 and lists the expected options."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0

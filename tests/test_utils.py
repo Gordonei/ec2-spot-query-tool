@@ -18,6 +18,18 @@ def mock_ec2(mocker):
         yield mock
 
 
+@pytest.fixture
+def wide_terminal(monkeypatch):
+    """Pin a wide terminal width for tests that assert on rich ``--help`` output.
+
+    Rich renders the Typer help panel width-dependently and truncates long
+    option names (e.g. ``--instance-type`` -> ``--insta…``) when the detected
+    width is narrow, as on the CI runner.  Forcing a wide ``COLUMNS`` keeps
+    those assertions deterministic.
+    """
+    monkeypatch.setenv("COLUMNS", "200")
+
+
 # Raw data returned by boto3 describe_spot_price_history
 # Format: one dict per API result line
 def _make_spot_record(

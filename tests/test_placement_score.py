@@ -23,19 +23,19 @@ runner = CliRunner()
 class TestCLICLIIntegration:
     """Test CLI integration of placement score flags."""
 
-    def test_placement_score_flag_in_help(self):
+    def test_placement_score_flag_in_help(self, wide_terminal):
         """--placement-score appears in --help output."""
         result = runner.invoke(cli.app, ["--help"])
         assert result.exit_code == 0
         assert "--placement-score" in result.stdout
 
-    def test_min_placement_score_flag_in_help(self):
+    def test_min_placement_score_flag_in_help(self, wide_terminal):
         """--min-placement-score appears in --help output."""
         result = runner.invoke(cli.app, ["--help"])
         assert result.exit_code == 0
         assert "--min-placement-score" in result.stdout
 
-    def test_target_capacity_flag_in_help(self):
+    def test_target_capacity_flag_in_help(self, wide_terminal):
         """--target-capacity appears in --help output."""
         result = runner.invoke(cli.app, ["--help"])
         assert result.exit_code == 0
