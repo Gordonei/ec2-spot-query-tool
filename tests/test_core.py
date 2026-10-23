@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 from unittest.mock import MagicMock, patch
 
-from ec2_spot_query import core, utils
+from ec2_spot_query import cache, core, utils
 
 
 def _make_spot_record(
@@ -279,6 +279,7 @@ def test_list_regions_cache_hit_skips_api(mock_ec2, tmp_path):
     """A valid cached region list is returned without calling describe_regions."""
     cache_file = tmp_path / "ec2-spot-cache.json"
     cache_file.write_text(json.dumps({
+        cache._VERSION_KEY: cache.CACHE_VERSION,
         "regions": {"data": ["us-east-1", "eu-west-1"], "expires_at": 9999999999},
     }), encoding="utf-8")
     with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):

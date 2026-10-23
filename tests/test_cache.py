@@ -192,3 +192,65 @@ class TestCacheKey:
         key1 = cache.make_spot_cache_key("t3.micro", ["eu-west-1", "us-east-1"])
         key2 = cache.make_spot_cache_key("t3.micro", ["us-east-1", "eu-west-1"])
         assert key1 == key2
+
+
+class TestCacheVersioning:
+    """Test that entries from a different cache version are ignored."""
+
+    def test_save_stamps_current_version(self, tmp_path):
+        """save_cache writes the current CACHE_VERSION into the file."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            cache.save_cache("k", "v", ttl_seconds=3600)
+        content = json.loads(cache_file.read_text(encoding="utf-8"))
+        assert content[cache._VERSION_KEY] == cache.CACHE_VERSION
+
+    def test_load_ignores_mismatched_version(self, tmp_path):
+        """load_cache returns None when the file version does not match."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        cache_file.write_text(json.dumps({
+            cache._VERSION_KEY: cache.CACHE_VERSION + 1,
+            "k": {"data": "v", "expires_at": 9999999999},
+        }), encoding="utf-8")
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            assert cache.load_cache("k") is None
+
+    def test_load_ignores_missing_version(self, tmp_path):
+        """A file written before versioning (no version key) is ignored."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        cache_file.write_text(json.dumps({
+            "k": {"data": "v", "expires_at": 9999999999},
+        }), encoding="utf-8")
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            assert cache.load_cache("k") is None
+
+    def test_load_returns_value_on_matching_version(self, tmp_path):
+        """load_cache returns the value when the version matches and unexpired."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            cache.save_cache("k", "v", ttl_seconds=3600)
+            assert cache.load_cache("k") == "v"
+
+    def test_save_discards_stale_entries(self, tmp_path):
+        """save_cache drops entries from a different version before writing."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        cache_file.write_text(json.dumps({
+            cache._VERSION_KEY: cache.CACHE_VERSION + 1,
+            "stale": {"data": "old", "expires_at": 9999999999},
+        }), encoding="utf-8")
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            cache.save_cache("fresh", "new", ttl_seconds=3600)
+        content = json.loads(cache_file.read_text(encoding="utf-8"))
+        assert "stale" not in content
+        assert content[cache._VERSION_KEY] == cache.CACHE_VERSION
+        assert content["fresh"]["data"] == "new"
+
+    def test_save_preserves_entries_on_matching_version(self, tmp_path):
+        """save_cache keeps existing entries when the version matches."""
+        cache_file = tmp_path / cache.CACHE_FILENAME
+        with patch("ec2_spot_query.cache.get_cache_path", return_value=cache_file):
+            cache.save_cache("a", 1, ttl_seconds=3600)
+            cache.save_cache("b", 2, ttl_seconds=3600)
+        content = json.loads(cache_file.read_text(encoding="utf-8"))
+        assert content["a"]["data"] == 1
+        assert content["b"]["data"] == 2

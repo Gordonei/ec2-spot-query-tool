@@ -15,6 +15,12 @@ INSTANCE_TTL_SECONDS = 31536000  # 1 year (365 days)
 REGIONS_TTL_SECONDS = 2592000  # 1 month (30 days)
 AZ_MAP_TTL_SECONDS = 31536000  # 1 year (AZ ID mappings rarely change)
 
+# Bump whenever the on-disk cache format or the meaning of a cached value
+# changes.  Entries written by a different version are ignored (treated as a
+# miss) so stale data is never served.
+CACHE_VERSION = 1
+_VERSION_KEY = "__version__"
+
 
 def get_cache_path() -> Path:
     """Return the single cache file path.
@@ -65,12 +71,20 @@ def _is_writable_or_can_become(path: Path) -> bool:
     return os.access(path, os.W_OK)
 
 
+def _version_matches(data: dict) -> bool:
+    """Return True if *data* was written by the current cache version."""
+    return data.get(_VERSION_KEY) == CACHE_VERSION
+
+
 def load_cache(key: str, ttl_seconds: float = SPOT_TTL_SECONDS) -> Any | None:
     """Load a cached value by *key*.
 
-    Returns ``None`` if the key is not found or the entry has expired.
+    Returns ``None`` if the key is not found, the entry has expired, or the
+    cache file was written by a different cache version.
     """
     with _open_cache(get_cache_path(), read_only=True) as data:
+        if not _version_matches(data):
+            return None
         entry = data.get(key)
         if entry is not None and time.time() < entry.get("expires_at", 0):
             return entry["data"]
@@ -78,12 +92,19 @@ def load_cache(key: str, ttl_seconds: float = SPOT_TTL_SECONDS) -> Any | None:
 
 
 def save_cache(key: str, data: Any, ttl_seconds: float = SPOT_TTL_SECONDS) -> None:
-    """Save *data* to disk under *key* with the given TTL."""
+    """Save *data* to disk under *key* with the given TTL.
+
+    Entries written by a different cache version are discarded before the new
+    value is written, and the file is stamped with the current version.
+    """
     entry = {
         "data": data,
         "expires_at": time.time() + ttl_seconds,
     }
     with _open_cache(get_cache_path(), read_only=False) as store:
+        if not _version_matches(store):
+            store.clear()
+        store[_VERSION_KEY] = CACHE_VERSION
         store[key] = entry
 
 
