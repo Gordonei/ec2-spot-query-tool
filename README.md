@@ -1,5 +1,7 @@
 # ec2-spot-query-tool
 
+[![CI](https://github.com/Gordonei/ec2-spot-query-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/Gordonei/ec2-spot-query-tool/actions/workflows/ci.yml)
+
 Analyze and rank AWS EC2 Spot instance prices across multiple time horizons.
 
 ## Prerequisites
