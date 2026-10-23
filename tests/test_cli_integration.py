@@ -432,11 +432,9 @@ class TestGlobExpansion:
 class TestFlags:
     """Test --progress and --debug flags."""
 
-    def test_progress_flag_in_help(self, wide_terminal):
-        """--progress flag appears in --help output."""
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "--progress" in result.stdout
+    def test_progress_flag_in_help(self, option_names):
+        """--progress option is exposed on the CLI."""
+        assert "--progress" in option_names
 
     def test_progress_flag_default_is_false(self, mocker):
         """Without --progress the CLI still runs (handler is a noop)."""
@@ -448,11 +446,9 @@ class TestFlags:
         )
         assert result.exit_code == 0
 
-    def test_debug_flag_in_help(self, wide_terminal):
-        """--debug flag appears in --help output."""
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "--debug" in result.stdout
+    def test_debug_flag_in_help(self, option_names):
+        """--debug option is exposed on the CLI."""
+        assert "--debug" in option_names
 
     def test_debug_configures_logging(self, mocker):
         """--debug enables detailed logging without breaking the run."""

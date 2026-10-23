@@ -126,8 +126,8 @@ def test_render_table_without_limit(capsys):
     assert "t3.large" in output
 
 
-def test_help_flag_lists_all_options(wide_terminal):
-    """--help exits 0 and lists the expected options."""
+def test_help_flag_lists_all_options(option_names):
+    """--help exits 0 and the command exposes the expected options."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     for flag in [
@@ -138,7 +138,7 @@ def test_help_flag_lists_all_options(wide_terminal):
         "--progress", "--debug", "--arch", "--architecture",
         "--placement-score", "--min-placement-score", "--target-capacity",
     ]:
-        assert flag in result.stdout, f"Missing {flag} in --help output"
+        assert flag in option_names, f"Missing {flag} option"
 
 
 def test_cli_invoke_no_errors(mock_ec2):

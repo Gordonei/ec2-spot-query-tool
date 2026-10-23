@@ -23,23 +23,17 @@ runner = CliRunner()
 class TestCLICLIIntegration:
     """Test CLI integration of placement score flags."""
 
-    def test_placement_score_flag_in_help(self, wide_terminal):
-        """--placement-score appears in --help output."""
-        result = runner.invoke(cli.app, ["--help"])
-        assert result.exit_code == 0
-        assert "--placement-score" in result.stdout
+    def test_placement_score_flag_in_help(self, option_names):
+        """--placement-score option is exposed on the CLI."""
+        assert "--placement-score" in option_names
 
-    def test_min_placement_score_flag_in_help(self, wide_terminal):
-        """--min-placement-score appears in --help output."""
-        result = runner.invoke(cli.app, ["--help"])
-        assert result.exit_code == 0
-        assert "--min-placement-score" in result.stdout
+    def test_min_placement_score_flag_in_help(self, option_names):
+        """--min-placement-score option is exposed on the CLI."""
+        assert "--min-placement-score" in option_names
 
-    def test_target_capacity_flag_in_help(self, wide_terminal):
-        """--target-capacity appears in --help output."""
-        result = runner.invoke(cli.app, ["--help"])
-        assert result.exit_code == 0
-        assert "--target-capacity" in result.stdout
+    def test_target_capacity_flag_in_help(self, option_names):
+        """--target-capacity option is exposed on the CLI."""
+        assert "--target-capacity" in option_names
 
     def test_render_table_with_score_column(self):
         """render_table with with_score=True shows Score column."""

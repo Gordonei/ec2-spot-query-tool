@@ -19,15 +19,23 @@ def mock_ec2(mocker):
 
 
 @pytest.fixture
-def wide_terminal(monkeypatch):
-    """Pin a wide terminal width for tests that assert on rich ``--help`` output.
+def option_names():
+    """Set of all CLI option strings (e.g. ``--instance-type``, ``-i``).
 
-    Rich renders the Typer help panel width-dependently and truncates long
-    option names (e.g. ``--instance-type`` -> ``--insta…``) when the detected
-    width is narrow, as on the CI runner.  Forcing a wide ``COLUMNS`` keeps
-    those assertions deterministic.
+    Inspects the Typer command definition directly rather than parsing the
+    rendered ``--help`` panel, which rich lays out width-dependently (it
+    truncates long option names on narrow terminals, as on the CI runner).
     """
-    monkeypatch.setenv("COLUMNS", "200")
+    import typer.main
+
+    from ec2_spot_query.cli import app
+
+    command = typer.main.get_command(app)
+    names = set()
+    for param in command.params:
+        for opts in (getattr(param, "opts", None), getattr(param, "secondary_opts", None)):
+            names.update(opts or [])
+    return names
 
 
 # Raw data returned by boto3 describe_spot_price_history
